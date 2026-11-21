@@ -269,7 +269,15 @@ function parseChemicalRichText(str) {
     return '\u0001SUPER:' + chg.replace(/-/g, '−') + '\u0002';
   });
 
-  // 3. Cargas directas tras símbolo o corchete: ej. [Si3O9]6- o Fe3+ o Cl-
+  // 3a. Número de hidrógenos seguido de carga: ej. OH3+, NH4+, CH3+, NH2-
+  //     El número es SIEMPRE subíndice (el H nunca lleva carga 3+), así que se separa:
+  //     OH3+ → O H₃ ⁺ (y no OH³⁺, que se leería como carga 3+)
+  s = s.replace(/H(\d+)([+\-−])(?=[,\s;)]|$)/g, (m, num, sign) => {
+    const sg = sign === '-' ? '−' : sign;
+    return 'H\u0001SUB:' + num + '\u0002\u0001SUPER:' + sg + '\u0002';
+  });
+
+  // 3b. Cargas directas tras símbolo o corchete: ej. [Si3O9]6- o Fe3+ o Cl-
   s = s.replace(/([A-Za-z)\]])(\d+)?([+\-−])(?=[,\s;)]|$)/g, (m, prev, num, sign) => {
     const s = sign === '-' ? '−' : sign;
     return prev + '\u0001SUPER:' + (num || '') + s + '\u0002';
@@ -584,6 +592,11 @@ function computeAutoAtomLabel(element, bondSum, charge = 0) {
     }
     if (element === 'C') {
       return bondSum === 0 ? 'CH3-' : null;
+    }
+    // Haluros (F⁻, Cl⁻, Br⁻, I⁻): el halógeno con carga negativa ya completó su octeto,
+    // así que no lleva hidrógenos implícitos (HCl + carga − → Cl⁻, no "HCl⁻")
+    if (['F', 'Cl', 'Br', 'I'].includes(element)) {
+      return element;
     }
   }
 
@@ -7296,6 +7309,17 @@ class SvgRenderer {
         mainTspan.setAttribute('text-anchor', 'middle');
         mainTspan.textContent = bondingAtom;
         textElem.appendChild(mainTspan);
+
+        // Carga tras el heteroátomo (ej. H4N+, H3O+): sin esto el '+' se perdía
+        if (suffix) {
+          const suffixTspan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
+          suffixTspan.setAttribute('x', atom.x + letterWidth / 2);
+          suffixTspan.setAttribute('y', atom.y + 5);
+          suffixTspan.setAttribute('text-anchor', 'start');
+          // Un signo suelto no tiene letra delante para que el parser lo vea como carga: '^' lo fuerza a superíndice
+          this.populateFormattedText(suffixTspan, /^[+\-−]$/.test(suffix) ? `^${suffix}` : suffix);
+          textElem.appendChild(suffixTspan);
+        }
       } else if (bondingSide === 'left') {
         // Heteroátomo de unión centrado en atom.x (ej. N)
         const mainTspan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');

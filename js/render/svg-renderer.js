@@ -769,6 +769,17 @@ export class SvgRenderer {
         mainTspan.setAttribute('text-anchor', 'middle');
         mainTspan.textContent = bondingAtom;
         textElem.appendChild(mainTspan);
+
+        // Carga tras el heteroátomo (ej. H4N+, H3O+): sin esto el '+' se perdía
+        if (suffix) {
+          const suffixTspan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
+          suffixTspan.setAttribute('x', atom.x + letterWidth / 2);
+          suffixTspan.setAttribute('y', atom.y + 5);
+          suffixTspan.setAttribute('text-anchor', 'start');
+          // Un signo suelto no tiene letra delante para que el parser lo vea como carga: '^' lo fuerza a superíndice
+          this.populateFormattedText(suffixTspan, /^[+\-−]$/.test(suffix) ? `^${suffix}` : suffix);
+          textElem.appendChild(suffixTspan);
+        }
       } else if (bondingSide === 'left') {
         // Heteroátomo de unión centrado en atom.x (ej. N)
         const mainTspan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
