@@ -1,0 +1,310 @@
+/**
+ * select-tool.js - Herramienta de selección múltiple, desplazamiento y redimensionamiento
+ */
+
+export class SelectTool {
+  constructor(state, renderer) {
+    this.state = state;
+    this.renderer = renderer;
+    this.isDragging = false;
+    this.dragStartPos = null;
+    this.initialPositions = new Map();
+    this.isMarqueeSelecting = false;
+    this.activeResizeBox = null;
+  }
+
+  onMouseDown(e, canvasPos, targetInfo) {
+    // 0. Tirador de rotación (↻) de la selección: gira los átomos seleccionados alrededor de su centro
+    if (targetInfo && targetInfo.isRotateHandle) {
+      const atoms = Array.from(this.state.selected.atoms).map(id => this.state.getAtom(id)).filter(Boolean);
+      if (atoms.length >= 2) {
+        this.state.saveSnapshot();
+        const cx = atoms.reduce((s, a) => s + a.x, 0) / atoms.length;
+        const cy = atoms.reduce((s, a) => s + a.y, 0) / atoms.length;
+        this.rotation = {
+          cx, cy,
+          startAngle: Math.atan2(canvasPos.y - cy, canvasPos.x - cx),
+          initial: new Map(atoms.map(a => [a.id, { x: a.x, y: a.y }]))
+        };
+      }
+      return;
+    }
+
+    // 1. Si se hace clic en el tirador de redimensionado de una caja de referencias
+    if (targetInfo && targetInfo.isBoxResizeHandle) {
+      this.activeResizeBox = this.state.referenceBoxes.get(targetInfo.boxId);
+      this.isDragging = true;
+      this.dragStartPos = { x: canvasPos.x, y: canvasPos.y };
+      return;
+    }
+
+    // 2. Si se hace clic sobre un elemento existente
+    if (targetInfo && targetInfo.id) {
+      const isShift = e.shiftKey;
+      this.handleElementClick(targetInfo, isShift);
+      this.isDragging = true;
+      this.dragStartPos = { x: canvasPos.x, y: canvasPos.y };
+      this.recordInitialPositions();
+      this.renderer.render();
+      return;
+    }
+
+    // 3. Clic en espacio libre
+    if (!e.shiftKey) {
+      this.state.clearSelection();
+    }
+    this.isMarqueeSelecting = true;
+    this.dragStartPos = { x: canvasPos.x, y: canvasPos.y };
+    this.renderer.render();
+  }
+
+  onMouseMove(e, canvasPos, targetInfo) {
+    if (this.rotation) {
+      const r = this.rotation;
+      let angle = Math.atan2(canvasPos.y - r.cy, canvasPos.x - r.cx) - r.startAngle;
+      if (e && e.shiftKey) {
+        const step = Math.PI / 12; // Shift: saltos de 15°
+        angle = Math.round(angle / step) * step;
+      }
+      const cos = Math.cos(angle), sin = Math.sin(angle);
+      for (const [id, p] of r.initial) {
+        const a = this.state.getAtom(id);
+        if (!a) continue;
+        const dx = p.x - r.cx, dy = p.y - r.cy;
+        a.x = r.cx + dx * cos - dy * sin;
+        a.y = r.cy + dx * sin + dy * cos;
+      }
+      this.renderer.rotationAngleDeg = Math.round((angle * 180) / Math.PI);
+      this.renderer.render();
+      return;
+    }
+
+    if (!this.isDragging && !this.isMarqueeSelecting) return;
+
+    if (this.activeResizeBox) {
+      const dx = canvasPos.x - this.dragStartPos.x;
+      const dy = canvasPos.y - this.dragStartPos.y;
+      this.activeResizeBox.width = Math.max(120, this.activeResizeBox.width + dx);
+      this.activeResizeBox.height = Math.max(50, this.activeResizeBox.height + dy);
+      this.activeResizeBox.userSized = true; // tamaño elegido a mano: no compactarlo automáticamente
+      this.dragStartPos = { x: canvasPos.x, y: canvasPos.y };
+      this.renderer.render();
+      return;
+    }
+
+    if (this.isDragging && this.dragStartPos) {
+      const dx = canvasPos.x - this.dragStartPos.x;
+      const dy = canvasPos.y - this.dragStartPos.y;
+
+      // Desplazar átomos seleccionados
+      for (const [id, pos] of this.initialPositions.get('atoms').entries()) {
+        const atom = this.state.getAtom(id);
+        if (atom) {
+          atom.x = pos.x + dx;
+          atom.y = pos.y + dy;
+        }
+      }
+
+      // Desplazar flechas seleccionadas
+      for (const [id, pos] of this.initialPositions.get('arrows').entries()) {
+        const arrow = this.state.arrows.get(id);
+        if (arrow) {
+          arrow.x1 = pos.x1 + dx;
+          arrow.y1 = pos.y1 + dy;
+          arrow.x2 = pos.x2 + dx;
+          arrow.y2 = pos.y2 + dy;
+        }
+      }
+
+      // Desplazar rótulos seleccionados
+      for (const [id, pos] of this.initialPositions.get('labels').entries()) {
+        const label = this.state.textLabels.get(id);
+        if (label) {
+          label.x = pos.x + dx;
+          label.y = pos.y + dy;
+        }
+      }
+
+      // Desplazar cajas de referencias seleccionadas
+      for (const [id, pos] of this.initialPositions.get('boxes').entries()) {
+        const box = this.state.referenceBoxes.get(id);
+        if (box) {
+          box.x = pos.x + dx;
+          box.y = pos.y + dy;
+        }
+      }
+
+      this.renderer.render();
+      return;
+    }
+
+    if (this.isMarqueeSelecting && this.dragStartPos) {
+      this.updateMarqueePreview(this.dragStartPos.x, this.dragStartPos.y, canvasPos.x, canvasPos.y);
+    }
+  }
+
+  onMouseUp(e, canvasPos, targetInfo) {
+    if (this.rotation) {
+      this.rotation = null;
+      this.renderer.rotationAngleDeg = null;
+      this.state.updateValences();
+      this.renderer.render();
+      return;
+    }
+
+    if (this.isDragging) {
+      this.state.saveSnapshot();
+      this.isDragging = false;
+      this.dragStartPos = null;
+      this.activeResizeBox = null;
+      this.renderer.render();
+    }
+
+    if (this.isMarqueeSelecting) {
+      this.clearMarqueePreview();
+      this.finishMarqueeSelection(this.dragStartPos, canvasPos);
+      this.isMarqueeSelecting = false;
+      this.dragStartPos = null;
+      this.renderer.render();
+    }
+  }
+
+  handleElementClick(targetInfo, isShift) {
+    const sel = this.state.selected;
+    const typeMap = {
+      atom: sel.atoms,
+      bond: sel.bonds,
+      arrow: sel.arrows,
+      label: sel.labels,
+      box: sel.boxes
+    };
+
+    const targetSet = typeMap[targetInfo.type];
+    if (!targetSet) return;
+
+    if (targetInfo.type === 'atom' && this.state.activeChargeMode) {
+      const atom = this.state.getAtom(targetInfo.id);
+      if (atom) {
+        this.state.saveSnapshot();
+        this.state.applyChargeToAtom(atom, this.state.activeChargeMode);
+        this.state.updateValences();
+      }
+    }
+
+    if (isShift) {
+      if (targetSet.has(targetInfo.id)) {
+        targetSet.delete(targetInfo.id);
+      } else {
+        targetSet.add(targetInfo.id);
+      }
+    } else {
+      if (!targetSet.has(targetInfo.id)) {
+        this.state.clearSelection();
+        targetSet.add(targetInfo.id);
+      }
+    }
+  }
+
+  recordInitialPositions() {
+    this.initialPositions = new Map([
+      ['atoms', new Map()],
+      ['arrows', new Map()],
+      ['labels', new Map()],
+      ['boxes', new Map()]
+    ]);
+
+    for (const id of this.state.selected.atoms) {
+      const a = this.state.getAtom(id);
+      if (a) this.initialPositions.get('atoms').set(id, { x: a.x, y: a.y });
+    }
+
+    for (const id of this.state.selected.arrows) {
+      const arr = this.state.arrows.get(id);
+      if (arr) this.initialPositions.get('arrows').set(id, { x1: arr.x1, y1: arr.y1, x2: arr.x2, y2: arr.y2 });
+    }
+
+    for (const id of this.state.selected.labels) {
+      const l = this.state.textLabels.get(id);
+      if (l) this.initialPositions.get('labels').set(id, { x: l.x, y: l.y });
+    }
+
+    for (const id of this.state.selected.boxes) {
+      const b = this.state.referenceBoxes.get(id);
+      if (b) this.initialPositions.get('boxes').set(id, { x: b.x, y: b.y });
+    }
+  }
+
+  updateMarqueePreview(x1, y1, x2, y2) {
+    if (!this.renderer || !this.renderer.svg) return;
+    const root = this.renderer.svg.querySelector('#canvas-root') || this.renderer.svg;
+    let preview = this.renderer.svg.querySelector('.marquee-selection-preview');
+    if (!preview) {
+      preview = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      preview.setAttribute('class', 'marquee-selection-preview');
+      preview.setAttribute('fill', '#3b82f6');
+      preview.setAttribute('fill-opacity', '0.15');
+      preview.setAttribute('stroke', '#2563eb');
+      preview.setAttribute('stroke-width', '1');
+      preview.setAttribute('stroke-dasharray', '4 4');
+      preview.setAttribute('pointer-events', 'none');
+      if (root) root.appendChild(preview);
+    }
+    const minX = Math.min(x1, x2), minY = Math.min(y1, y2);
+    const w = Math.abs(x2 - x1), h = Math.abs(y2 - y1);
+    preview.setAttribute('x', minX);
+    preview.setAttribute('y', minY);
+    preview.setAttribute('width', w);
+    preview.setAttribute('height', h);
+  }
+
+  clearMarqueePreview() {
+    if (!this.renderer || !this.renderer.svg) return;
+    const preview = this.renderer.svg.querySelector('.marquee-selection-preview');
+    if (preview && preview.parentNode) {
+      preview.parentNode.removeChild(preview);
+    }
+  }
+
+  finishMarqueeSelection(start, end) {
+    if (!start || !end) return;
+    const minX = Math.min(start.x, end.x), maxX = Math.max(start.x, end.x);
+    const minY = Math.min(start.y, end.y), maxY = Math.max(start.y, end.y);
+
+    if (maxX - minX < 5 && maxY - minY < 5) return;
+
+    const newlySelectedAtoms = [];
+    for (const atom of this.state.atoms.values()) {
+      if (atom.x >= minX && atom.x <= maxX && atom.y >= minY && atom.y <= maxY) {
+        this.state.selected.atoms.add(atom.id);
+        newlySelectedAtoms.push(atom);
+      }
+    }
+    if (this.state.activeChargeMode && newlySelectedAtoms.length > 0) {
+      this.state.saveSnapshot();
+      for (const a of newlySelectedAtoms) {
+        this.state.applyChargeToAtom(a, this.state.activeChargeMode);
+      }
+      this.state.updateValences();
+    }
+    for (const arrow of this.state.arrows.values()) {
+      const mx = (arrow.x1 + arrow.x2) / 2;
+      const my = (arrow.y1 + arrow.y2) / 2;
+      if (mx >= minX && mx <= maxX && my >= minY && my <= maxY) {
+        this.state.selected.arrows.add(arrow.id);
+      }
+    }
+    for (const label of this.state.textLabels.values()) {
+      if (label.x >= minX && label.x <= maxX && label.y >= minY && label.y <= maxY) {
+        this.state.selected.labels.add(label.id);
+      }
+    }
+    // Recuadros de abreviaturas: se seleccionan si el recuadro de selección toca cualquier parte de ellos
+    for (const box of this.state.referenceBoxes.values()) {
+      if (box.boxType === 'compound') continue;
+      const bx2 = box.x + box.width, by2 = box.y + box.height;
+      if (box.x <= maxX && bx2 >= minX && box.y <= maxY && by2 >= minY) {
+        this.state.selected.boxes.add(box.id);
+      }
+    }
+  }
+}

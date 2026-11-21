@@ -1,0 +1,163 @@
+{
+  "version": "1.0",
+  "created": "2026-09-11T17:00:00.000Z",
+  "atoms": [
+    { "id": "g_c1", "x": 195, "y": 175, "element": "C", "chairVertex": "c1" },
+    { "id": "g_c2", "x": 155, "y": 198, "element": "C", "chairVertex": "c2" },
+    { "id": "g_c3", "x": 100, "y": 182, "element": "C", "chairVertex": "c3" },
+    { "id": "g_c4", "x": 80, "y": 148, "element": "C", "chairVertex": "c4" },
+    { "id": "g_c5", "x": 125, "y": 122, "element": "C", "chairVertex": "c5" },
+    { "id": "g_o6", "x": 180, "y": 140, "element": "O", "label": "O", "chairVertex": "o6" },
+    
+    { "id": "g_oh1", "x": 195, "y": 210, "element": "O", "label": "OH" },
+    { "id": "g_oh2", "x": 173, "y": 228, "element": "O", "label": "HO" },
+    { "id": "g_oh3", "x": 70, "y": 202, "element": "O", "label": "HO" },
+    { "id": "g_oh4", "x": 45, "y": 148, "element": "O", "label": "HO" },
+    { "id": "g_c6_oh", "x": 110, "y": 87, "element": "O", "label": "OH" },
+
+    { "id": "g2_c1", "x": 580, "y": 365, "element": "C", "chairVertex": "c1" },
+    { "id": "g2_c2", "x": 540, "y": 388, "element": "C", "chairVertex": "c2" },
+    { "id": "g2_c3", "x": 485, "y": 372, "element": "C", "chairVertex": "c3" },
+    { "id": "g2_c4", "x": 465, "y": 338, "element": "C", "chairVertex": "c4" },
+    { "id": "g2_c5", "x": 510, "y": 312, "element": "C", "chairVertex": "c5" },
+    { "id": "g2_o6", "x": 565, "y": 330, "element": "O", "label": "O", "chairVertex": "o6" },
+    { "id": "g2_sub1", "x": 595, "y": 405, "element": "O", "label": "OMe" },
+    { "id": "g2_sub2", "x": 558, "y": 418, "element": "O", "label": "BnO" },
+    { "id": "g2_sub3", "x": 455, "y": 392, "element": "O", "label": "BnO" },
+    { "id": "g2_sub4", "x": 430, "y": 338, "element": "O", "label": "HO" },
+    { "id": "g2_sub5", "x": 495, "y": 277, "element": "O", "label": "OBn" }
+  ],
+  "bonds": [
+    { "id": "gb_1_2", "atom1": "g_c1", "atom2": "g_c2", "type": "single", "isFront": true },
+    { "id": "gb_2_3", "atom1": "g_c2", "atom2": "g_c3", "type": "wedge", "isFront": true },
+    { "id": "gb_3_4", "atom1": "g_c3", "atom2": "g_c4", "type": "single" },
+    { "id": "gb_4_5", "atom1": "g_c4", "atom2": "g_c5", "type": "single" },
+    { "id": "gb_5_6", "atom1": "g_c5", "atom2": "g_o6", "type": "single" },
+    { "id": "gb_6_1", "atom1": "g_o6", "atom2": "g_c1", "type": "single" },
+    { "id": "gb_c1_oh", "atom1": "g_c1", "atom2": "g_oh1", "type": "single" },
+    { "id": "gb_c2_oh", "atom1": "g_c2", "atom2": "g_oh2", "type": "single" },
+    { "id": "gb_c3_oh", "atom1": "g_c3", "atom2": "g_oh3", "type": "single" },
+    { "id": "gb_c4_oh", "atom1": "g_c4", "atom2": "g_oh4", "type": "single" },
+    { "id": "gb_c5_oh", "atom1": "g_c5", "atom2": "g_c6_oh", "type": "single" },
+
+    { "id": "gb2_1_2", "atom1": "g2_c1", "atom2": "g2_c2", "type": "single", "isFront": true },
+    { "id": "gb2_2_3", "atom1": "g2_c2", "atom2": "g2_c3", "type": "wedge", "isFront": true },
+    { "id": "gb2_3_4", "atom1": "g2_c3", "atom2": "g2_c4", "type": "single" },
+    { "id": "gb2_4_5", "atom1": "g2_c4", "atom2": "g2_c5", "type": "single" },
+    { "id": "gb2_5_6", "atom1": "g2_c5", "atom2": "g2_o6", "type": "single" },
+    { "id": "gb2_6_1", "atom1": "g2_o6", "atom2": "g2_c1", "type": "single" },
+    { "id": "gb2_sub1_b", "atom1": "g2_c1", "atom2": "g2_sub1", "type": "single" },
+    { "id": "gb2_sub2_b", "atom1": "g2_c2", "atom2": "g2_sub2", "type": "single" },
+    { "id": "gb2_sub3_b", "atom1": "g2_c3", "atom2": "g2_sub3", "type": "single" },
+    { "id": "gb2_sub4_b", "atom1": "g2_c4", "atom2": "g2_sub4", "type": "single" },
+    { "id": "gb2_sub5_b", "atom1": "g2_c5", "atom2": "g2_sub5", "type": "single" }
+  ],
+  "arrows": [
+    {
+      "id": "arr_1",
+      "x1": 225,
+      "y1": 160,
+      "x2": 315,
+      "y2": 160,
+      "type": "normal",
+      "reagentsTop": "CH3OH, HCl",
+      "reagentsBottom": ""
+    },
+    {
+      "id": "arr_2",
+      "x1": 345,
+      "y1": 160,
+      "x2": 435,
+      "y2": 160,
+      "type": "normal",
+      "reagentsTop": "PhCH(OMe)2",
+      "reagentsBottom": "p-TsOH"
+    },
+    {
+      "id": "arr_3",
+      "x1": 465,
+      "y1": 160,
+      "x2": 565,
+      "y2": 160,
+      "type": "normal",
+      "reagentsTop": "NaH (excess)",
+      "reagentsBottom": "MeI (excess)"
+    },
+    {
+      "id": "arr_4",
+      "x1": 600,
+      "y1": 160,
+      "x2": 690,
+      "y2": 160,
+      "type": "normal",
+      "reagentsTop": "p-TsOH",
+      "reagentsBottom": "H2O"
+    },
+    {
+      "id": "arr_down_start",
+      "x1": 165,
+      "y1": 210,
+      "x2": 165,
+      "y2": 310,
+      "type": "normal",
+      "reagentsTop": "",
+      "reagentsBottom": "NaH (excess)\nMeI (excess)"
+    },
+    {
+      "id": "arr_f_to_g",
+      "x1": 185,
+      "y1": 335,
+      "x2": 285,
+      "y2": 335,
+      "type": "normal",
+      "reagentsTop": "H2O, HCl",
+      "reagentsBottom": ""
+    },
+    {
+      "id": "arr_b_to_inter",
+      "x1": 460,
+      "y1": 220,
+      "x2": 460,
+      "y2": 335,
+      "type": "normal",
+      "reagentsTop": "",
+      "reagentsBottom": "1) NaH, BnCl\n2) NaBH3CN"
+    },
+    {
+      "id": "arr_inter_to_e",
+      "x1": 620,
+      "y1": 335,
+      "x2": 700,
+      "y2": 335,
+      "type": "normal",
+      "reagentsTop": "1) Ac2O, Py",
+      "reagentsBottom": "2) DIBAL-H (excess)"
+    }
+  ],
+  "referenceBoxes": [
+    {
+      "id": "ref_icho_1",
+      "x": 65,
+      "y": 440,
+      "width": 680,
+      "height": 70,
+      "title": "",
+      "items": [
+        { "abbr": "Ac", "formula": "H3C-C(=O)~" },
+        { "abbr": "Bn", "formula": "PhCH2" },
+        { "abbr": "DIBAL-H", "formula": "i-Bu2AlH" },
+        { "abbr": "p-TsOH", "formula": "H3C-C6H4-SO3H" },
+        { "abbr": "Py", "formula": "Piridina" }
+      ]
+    }
+  ],
+  "textLabels": [
+    { "id": "lbl_a", "x": 330, "y": 165, "text": "A", "isIntermediary": true },
+    { "id": "lbl_b", "x": 450, "y": 165, "text": "B", "isIntermediary": true },
+    { "id": "lbl_c", "x": 580, "y": 165, "text": "C", "isIntermediary": true },
+    { "id": "lbl_d", "x": 705, "y": 165, "text": "D", "isIntermediary": true },
+    { "id": "lbl_f", "x": 165, "y": 340, "text": "F", "isIntermediary": true },
+    { "id": "lbl_g", "x": 305, "y": 340, "text": "G", "isIntermediary": true },
+    { "id": "lbl_e", "x": 720, "y": 340, "text": "E", "isIntermediary": true }
+  ]
+}

@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ChemStudio</title>
+  <link rel="stylesheet" href="css/app.css" />
+</head>
+<body>
+
+  <!-- Cabecera -->
+  <header class="header">
+    <div class="brand">
+      <div class="brand-icon">⬡</div>
+      <div class="brand-text">
+        <span class="brand-title">ChemStudio</span>
+        <span class="brand-badge">Versión 1.4</span>
+      </div>
+    </div>
+
+    <div class="top-actions">
+      <div class="btn-group">
+        <button class="btn btn-sm" id="btn-undo" title="Deshacer (Ctrl+Z)">↶ Deshacer</button>
+        <button class="btn btn-sm" id="btn-redo" title="Rehacer (Ctrl+Y)">↷ Rehacer</button>
+      </div>
+
+      <div class="btn-group">
+        <button class="btn btn-sm" id="btn-toggle-problem-mode" title="Modo Construir Problema: al trazar flechas genera automáticamente recuadros [A] y [B], y encadena [C]...">
+          Modo Problema
+        </button>
+        <button class="btn btn-sm btn-primary" id="btn-fit-scheme" style="font-weight: bold;" title="Encajar Esquema: ajusta flechas según reactivos y dimensiona recuadros para que no se coman ningún compuesto">
+          Encajar Esquema
+        </button>
+        <button class="btn btn-sm" id="btn-toggle-boxes-visibility" title="Alternar visibilidad de los recuadros punteados (A, B, C...)">
+          Recuadros (On)
+        </button>
+      </div>
+
+      <div class="btn-group">
+        <button class="btn btn-sm" id="btn-toggle-dark-mode" title="Alternar Modo Oscuro (dibujo sobre fondo negro con enlaces, flechas y textos en blanco)">
+          Modo Oscuro
+        </button>
+      </div>
+
+      <div class="btn-group">
+        <button class="btn btn-sm" id="btn-center-between-arrows" title="Centrar intermediario o compuesto seleccionado automáticamente entre las dos flechas">
+          ⇥ Centrar entre Flechas ⇤
+        </button>
+        <button class="btn btn-sm" id="btn-adjust-arrows" title="Ajusta automáticamente las flechas fuera del recuadro de las moléculas para que no las corten">Ajustar Flechas</button>
+        <button class="btn btn-sm" id="btn-align-h" title="Alinear centros horizontales (mismo eje Y)">⇕ Alinear H</button>
+        <button class="btn btn-sm" id="btn-align-v" title="Alinear centros verticales (mismo eje X)">⇔ Alinear V</button>
+        <button class="btn btn-sm" id="btn-distribute-h" title="Distribuir elementos con espaciado uniforme">⋯ Distribuir</button>
+      </div>
+
+      <div class="btn-group">
+        <button class="btn btn-sm" id="btn-toggle-monochrome" title="Blanco y negro: quita el código de colores de los átomos (O rojo, N azul...) para un estilo limpio de examen">◐ Blanco y negro</button>
+        <button class="btn btn-sm" id="btn-load-example" title="Abrir la galería de ejemplos (IChO, Suzuki, diclofenaco...)">✦ Ejemplos</button>
+        <button class="btn btn-sm" id="btn-clear" title="Limpiar lienzo">🗑 Limpiar</button>
+      </div>
+
+      <div class="btn-group">
+        <button class="btn btn-sm btn-primary" id="btn-export-svg" title="Descargar como gráfico vectorial SVG">SVG Vectorial</button>
+        <button class="btn btn-sm btn-success" id="btn-export-png" title="Descargar como imagen PNG 300 DPI">PNG 300 DPI</button>
+        <button class="btn btn-sm" id="btn-save-json" title="Guardar proyecto JSON">Guardar</button>
+        <button class="btn btn-sm" id="btn-load-json" title="Cargar proyecto JSON">Abrir</button>
+        <input type="file" id="file-input-json" accept=".json" style="display: none;" />
+      </div>
+    </div>
+  </header>
+
+  <div class="workspace">
+
+    <!-- Paleta de herramientas (izquierda) -->
+    <aside class="toolbar-left">
+      <button class="tool-btn active" data-tool="select" title="Seleccionar y Desplazar (V o S) [Clic derecho para Pan]">
+        <span class="tool-icon">↖</span>
+        <span class="tool-shortcut">V</span>
+      </button>
+
+      <div class="tool-sep"></div>
+
+      <button class="tool-btn" data-tool="bond" data-sub="single" title="Enlace Simple (B o tecla 1) [Longitud fija]">
+        <span class="tool-icon">╱</span>
+        <span class="tool-shortcut">1</span>
+      </button>
+
+      <button class="tool-btn" data-tool="bond" data-sub="double" title="Enlace Doble (tecla 2)">
+        <span class="tool-icon">═</span>
+        <span class="tool-shortcut">2</span>
+      </button>
+
+      <button class="tool-btn" data-tool="bond" data-sub="triple" title="Enlace Triple (tecla 3)">
+        <span class="tool-icon">≡</span>
+        <span class="tool-shortcut">3</span>
+      </button>
+
+      <button class="tool-btn" data-tool="bond" data-sub="wedge" title="Cuña Sólida (Estereoquímica Up / Hacia adelante)">
+        <span class="tool-icon">▲</span>
+      </button>
+
+      <button class="tool-btn" data-tool="bond" data-sub="dash" title="Cuña a Trazos (Estereoquímica Down / Hacia atrás)">
+        <span class="tool-icon">▤</span>
+      </button>
+
+      <button class="tool-btn" data-tool="bond" data-sub="wavy" title="Enlace Ondulado (Estereoquímica indefinida)">
+        <span class="tool-icon">∿</span>
+      </button>
+
+      <button class="tool-btn" data-tool="bond" data-sub="dashed" title="Enlace Punteado / Discontinuo (Punto de unión / coordinación / abreviaturas)">
+        <span class="tool-icon" style="letter-spacing: -2px; font-weight: bold;">╌╌</span>
+        <span class="tool-shortcut">4</span>
+      </button>
+
+      <div class="tool-sep"></div>
+
+      <button class="tool-btn" data-tool="arrow" title="Flecha de Reacción (A) [Snapping a 0°, 45°, 90°, 180°, 270° y reactivos]">
+        <span class="tool-icon">➔</span>
+        <span class="tool-shortcut">A</span>
+      </button>
+
+      <button class="tool-btn" data-tool="arrow" data-sub="fork" title="Flecha de Bifurcación (Estereoselectividad: Anti / Syn)">
+        <span class="tool-icon">🔀</span>
+      </button>
+
+      <button class="tool-btn" data-tool="arrow" data-sub="converge" title="Flecha de Convergencia (Cerrar Bifurcación: 2 reactivos hacia 1 producto)">
+        <span class="tool-icon">⏩</span>
+      </button>
+
+      <button class="tool-btn" data-tool="arrow" data-sub="bent" title="Flecha Doblada en L (arrastra de la salida a la llegada: sale en horizontal y baja; si arrastras más en vertical, baja y luego gira). Los reactivos van en el primer tramo.">
+        <span class="tool-icon">↴</span>
+      </button>
+
+      <button class="tool-btn" data-tool="arrow" data-sub="dashed" title="Flecha Punteada / Discontinua (Indicar unión en abreviaturas / -Ms, -TBS o mecanismo)">
+        <span class="tool-icon">⇢</span>
+      </button>
+
+      <button class="tool-btn" data-tool="chair" data-sub="CHAIR_CYCLOHEXANE" title="Silla de Ciclohexano Normal (Tecla C) [Axiales verticales y ecuatoriales]">
+        <span class="tool-icon">🪑</span>
+        <span class="tool-shortcut">C</span>
+      </button>
+
+      <button class="tool-btn" data-tool="chair" data-sub="CHAIR_FLIP" title="Giro de Silla Ciclohexano (Conformador Invertido / Tecla C de nuevo)">
+        <span class="tool-icon">🔄</span>
+      </button>
+
+      <button class="tool-btn" data-tool="chair" data-sub="PYRANOSE_CHAIR" title="Silla Piranosa IChO (Azúcares / Glucosa con O en anillo)">
+        <span class="tool-icon">🍬</span>
+      </button>
+
+      <button class="tool-btn" data-tool="chair" data-sub="PYRANOSE_CHAIR_FLIP" title="Piranosa Giro de Silla (Glucosa Invertida)">
+        <span class="tool-icon">🔁</span>
+      </button>
+
+      <button class="tool-btn" data-tool="template" data-sub="BENZENE" title="Anillo de Benceno">
+        <span class="tool-icon">⌬</span>
+      </button>
+
+      <button class="tool-btn" data-tool="template" data-sub="CYCLOPENTANE" title="Ciclopentano">
+        <span class="tool-icon">⬠</span>
+      </button>
+
+      <div class="tool-sep"></div>
+
+      <button class="tool-btn" data-tool="text" title="Rótulos de Intermediarios (A, B, C...) o Fórmulas (T)">
+        <span class="tool-icon">𝓣</span>
+        <span class="tool-shortcut">T</span>
+      </button>
+
+      <button class="tool-btn" data-tool="reference" title="Añadir Recuadro de Referencias (Borde punteado)">
+        <span class="tool-icon">⬚</span>
+        <span class="tool-shortcut">R</span>
+      </button>
+
+      <button class="tool-btn" data-tool="eraser" title="Borrador de elementos (E)">
+        <span class="tool-icon">⌫</span>
+        <span class="tool-shortcut">E</span>
+      </button>
+    </aside>
+
+    <!-- Lienzo de dibujo -->
+    <main class="canvas-container">
+      <svg id="chem-canvas"></svg>
+    </main>
+
+    <!-- Panel lateral derecho -->
+    <aside class="sidebar-right">
+      <div class="panel-section">
+        <div class="panel-title">Átomos Rápidos (Teclas)</div>
+        <div class="element-grid" style="grid-template-columns: repeat(6, 1fr);">
+          <button class="elem-btn active" data-elem="C" title="Carbono (C / 1)">C</button>
+          <button class="elem-btn" data-elem="H" title="Hidrógeno (H)">H</button>
+          <button class="elem-btn" data-elem="O" title="Oxígeno (O)">O</button>
+          <button class="elem-btn" data-elem="N" title="Nitrógeno (N)">N</button>
+          <button class="elem-btn" data-elem="S" title="Azufre (S)">S</button>
+          <button class="elem-btn" data-elem="P" title="Fósforo (P)">P</button>
+          <button class="elem-btn" data-elem="F" title="Flúor (F)">F</button>
+          <button class="elem-btn" data-elem="Cl" title="Cloro (Cl / L)">Cl</button>
+          <button class="elem-btn" data-elem="Br" title="Bromo (Br)">Br</button>
+          <button class="elem-btn" data-elem="I" title="Yodo (I)">I</button>
+          <button class="elem-btn" data-elem="Si" title="Silicio (Si / K)" style="color: #0284c7; font-weight: bold;">Si</button>
+          <button class="elem-btn" data-elem="B" title="Boro (B)" style="color: #ea580c; font-weight: bold;">B</button>
+        </div>
+
+        <button class="btn btn-sm btn-outline" id="btn-open-periodic-table" style="width: 100%; margin-top: 6px; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 5px 8px; border-color: #38bdf8;" title="Abrir la Tabla Periódica completa para seleccionar cualquier elemento (metales, metaloides, halógenos, etc.)">
+          <span style="font-size: 13px;">🌐</span> Tabla Periódica (+ Elementos)
+        </button>
+
+        <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e2e8f0;">
+          <div style="font-size: 11px; font-weight: 600; color: #475569; margin-bottom: 4px;">Elemento / Grupo (Tecla G):</div>
+          <div style="display: flex; gap: 4px;">
+            <input type="text" id="input-quick-group" class="form-input" placeholder="ej. Si, Li, OMs" value="Si" style="width: 50%; font-weight: bold; font-size: 13px; text-align: center;" title="Escribe cualquier elemento (ej. Si, B, Li, Na, Fe, Pd) o grupo químico (ej. OMs, OTs, Ph)" />
+            <button class="btn btn-sm btn-primary" id="btn-select-group" style="width: 50%; font-size: 11px; font-weight: bold;" title="Seleccionar este elemento o grupo para sustituir átomos o trazar enlaces">Seleccionar</button>
+          </div>
+          <div style="display: flex; flex-wrap: wrap; gap: 3px; margin-top: 5px;">
+            <button class="btn btn-sm btn-outline quick-group-chip" data-group="Si" style="padding: 1px 5px; font-size: 10px; font-weight: bold; color: #0284c7;">Si</button>
+            <button class="btn btn-sm btn-outline quick-group-chip" data-group="B" style="padding: 1px 5px; font-size: 10px; font-weight: bold; color: #ea580c;">B</button>
+            <button class="btn btn-sm btn-outline quick-group-chip" data-group="Li" style="padding: 1px 5px; font-size: 10px;">Li</button>
+            <button class="btn btn-sm btn-outline quick-group-chip" data-group="Na" style="padding: 1px 5px; font-size: 10px;">Na</button>
+            <button class="btn btn-sm btn-outline quick-group-chip" data-group="Mg" style="padding: 1px 5px; font-size: 10px;">Mg</button>
+            <button class="btn btn-sm btn-outline quick-group-chip" data-group="OMs" style="padding: 1px 5px; font-size: 10px;">OMs</button>
+            <button class="btn btn-sm btn-outline quick-group-chip" data-group="OTs" style="padding: 1px 5px; font-size: 10px;">OTs</button>
+            <button class="btn btn-sm btn-outline quick-group-chip" data-group="OAc" style="padding: 1px 5px; font-size: 10px;">OAc</button>
+            <button class="btn btn-sm btn-outline quick-group-chip" data-group="OBn" style="padding: 1px 5px; font-size: 10px;">OBn</button>
+            <button class="btn btn-sm btn-outline quick-group-chip" data-group="Ph" style="padding: 1px 5px; font-size: 10px;">Ph</button>
+            <button class="btn btn-sm btn-outline quick-group-chip" data-group="COOMe" style="padding: 1px 5px; font-size: 10px;">COOMe</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <div class="panel-title">Cargas y Pares de Electrones</div>
+        <p style="font-size: 11px; color: #64748b; margin-bottom: 8px;">
+          Aplica carga formal o pares libres al átomo seleccionado o bajo el cursor:
+        </p>
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin-bottom: 8px;">
+          <button class="btn btn-sm btn-charge" id="btn-charge-pos" title="Modo Carga Positiva (+ o =): haz clic en átomos" style="font-weight: bold; color: #2563eb;">⊕ (+)</button>
+          <button class="btn btn-sm btn-charge" id="btn-charge-neg" title="Modo Carga Negativa (-): haz clic en átomos" style="font-weight: bold; color: #dc2626;">⊖ (−)</button>
+          <button class="btn btn-sm btn-charge" id="btn-lone-pairs" title="Modo Pares Libres (: o ;): haz clic en átomos" style="font-weight: bold;">·· (LP)</button>
+          <button class="btn btn-sm btn-charge" id="btn-charge-neutral" title="Modo Neutro (0): haz clic en átomos" style="font-weight: bold;">0</button>
+        </div>
+        <div id="charge-mode-banner" style="display: none; margin-bottom: 8px; padding: 6px 8px; border-radius: 6px; font-size: 11px; background: rgba(37,99,235,0.1); border: 1px solid rgba(37,99,235,0.3); color: #1e40af; align-items: center; justify-content: space-between;">
+          <span id="charge-mode-text">⚡ Modo Carga Activo: Clic en átomos para aplicar</span>
+          <button id="btn-charge-mode-close" style="background: none; border: none; cursor: pointer; font-weight: bold; color: #64748b; font-size: 13px;" title="Salir de modo carga (Esc)">✕</button>
+        </div>
+        <div style="display: flex; gap: 6px;">
+          <button class="btn btn-sm btn-outline" id="btn-quick-pyridinium" style="width: 100%; font-size: 11px;" title="Asignar carga formal (+) a piridinio o amonio cuaternario">⚡ Piridinio / Ion (+)</button>
+        </div>
+      </div>
+
+      <div class="panel-section" id="inspector-molecule" style="display: none;">
+        <div class="panel-title">Rótulo y Estereoquímica</div>
+        <p style="font-size: 11px; color: #64748b; margin-bottom: 8px;">
+          Asigna una letra debajo de la molécula (A, B, C...):
+        </p>
+        <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+          <input type="text" id="input-mol-label" class="form-input" placeholder="A" value="A" style="width: 45%; font-weight: bold; font-size: 15px; text-align: center;" />
+          <button class="btn btn-sm btn-primary" id="btn-assign-mol-label" style="width: 55%;">Poner Letra</button>
+        </div>
+
+        <div style="font-size: 11px; font-weight: 600; color: #475569; margin: 8px 0 4px;">Descriptor Estereoquímico (Italic):</div>
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-bottom: 8px;">
+          <button class="btn btn-sm btn-outline btn-stereo" data-stereo="Anti" style="font-style: italic; font-weight: bold;">Anti</button>
+          <button class="btn btn-sm btn-outline btn-stereo" data-stereo="Syn" style="font-style: italic; font-weight: bold;">Syn</button>
+          <button class="btn btn-sm btn-outline btn-stereo" data-stereo="(E)" style="font-style: italic; font-weight: bold;">(E)</button>
+          <button class="btn btn-sm btn-outline btn-stereo" data-stereo="(Z)" style="font-style: italic; font-weight: bold;">(Z)</button>
+          <button class="btn btn-sm btn-outline btn-stereo" data-stereo="cis" style="font-style: italic; font-weight: bold;">cis</button>
+          <button class="btn btn-sm btn-outline btn-stereo" data-stereo="trans" style="font-style: italic; font-weight: bold;">trans</button>
+        </div>
+
+        <div style="font-size: 11px; font-weight: 600; color: #475569; margin: 8px 0 4px;">Descripción / Subtítulo del Producto:</div>
+        <div style="display: flex; gap: 6px; margin-bottom: 4px;">
+          <input type="text" id="input-mol-description" class="form-input" placeholder="ej. Si3O9(6-) o Control Cinético" style="width: 65%; font-size: 12px;" />
+          <button class="btn btn-sm btn-primary" id="btn-add-mol-description" style="width: 35%;">Añadir</button>
+        </div>
+        <button class="btn btn-sm btn-outline" id="btn-auto-formula-desc" style="width: 100%; font-size: 11px; margin-bottom: 6px;" title="Calcular automáticamente la fórmula molecular y carga neta (ej. Si3O9(6-))">
+          🧪 Auto-Fórmula Química
+        </button>
+      </div>
+
+      <div class="panel-section" id="inspector-arrow" style="display: none;">
+        <div class="panel-title">Propiedades de Flecha</div>
+        <div style="display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px;">
+          <button class="btn btn-sm btn-outline" id="btn-toggle-dashed-arrow" style="width: 100%;">⇢ Alternar Flecha Punteada</button>
+          <button class="btn btn-sm btn-outline" id="btn-toggle-bent-arrow" style="width: 100%;" title="Recta → doblada (→ ↓) → doblada (↓ →) → recta">↴ Doblar en L</button>
+          <button class="btn btn-sm btn-outline" id="btn-toggle-fork-arrow" style="width: 100%;">🔀 Alternar Bifurcación (1 ➔ 2)</button>
+          <button class="btn btn-sm btn-outline" id="btn-toggle-converge-arrow" style="width: 100%;">⏩ Alternar Convergencia (2 ➔ 1)</button>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="arrow-reagents-top">Reactivos Arriba / Lado:</label>
+          <textarea id="arrow-reagents-top" class="form-textarea" placeholder="1) NaH, BnCl&#10;2) NaBH3CN"></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="arrow-reagents-bottom">Reactivos Abajo:</label>
+          <textarea id="arrow-reagents-bottom" class="form-textarea" placeholder="p-TsOH&#10;H2O"></textarea>
+        </div>
+
+        <div class="form-group" style="margin-top: 10px; border-top: 1px dashed #cbd5e1; padding-top: 8px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+            <label class="form-label" style="margin-bottom: 0; font-weight: 600;">Molécula sobre la Flecha:</label>
+            <span id="arrow-struct-badge" style="font-size: 10px; color: #2563eb; font-weight: bold; background: rgba(37,99,235,0.12); padding: 1px 6px; border-radius: 4px; display: none;">🔬 Asignada</span>
+          </div>
+          <p style="font-size: 11px; color: #64748b; margin-bottom: 6px;">
+            Dibuja o añade un reactivo sobre la flecha (ej. dieno para Diels-Alder, alqueno, etc.):
+          </p>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 4px;">
+            <button class="btn btn-sm btn-primary" id="btn-draw-arrow-struct" style="font-size: 11px;" title="Abrir pizarra ChemStudio para dibujar la molécula sobre la flecha">
+              ✏️ Dibujar Molécula
+            </button>
+            <button class="btn btn-sm btn-outline" id="btn-import-selection-to-arrow" style="font-size: 11px;" title="Importar la molécula seleccionada en el lienzo a esta flecha">
+              📥 De Selección
+            </button>
+          </div>
+          <button class="btn btn-sm btn-outline" id="btn-clear-arrow-struct" style="width: 100%; font-size: 11px; color: #ef4444; border-color: rgba(239, 68, 68, 0.4); display: none; margin-top: 3px;" title="Quitar la molécula de la flecha">
+            🗑️ Quitar Molécula
+          </button>
+        </div>
+      </div>
+
+      <div class="panel-section" id="inspector-chair" style="display: none;">
+        <div class="panel-title">Sustituyentes de Silla</div>
+        <p style="font-size: 11px; color: #64748b; margin-bottom: 8px;">
+          Vértice seleccionado: añade enlaces en la orientación canónica exacta:
+        </p>
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <button class="btn btn-sm" id="btn-add-axial">↑ Añadir Enlace Axial</button>
+          <button class="btn btn-sm" id="btn-add-equatorial">↗ Añadir Enlace Ecuatorial</button>
+        </div>
+      </div>
+
+      <div class="panel-section" id="inspector-refbox" style="display: none;">
+        <div class="panel-title">Recuadro de Referencias IChO</div>
+        <p style="font-size: 11px; color: #64748b; margin-bottom: 8px;">
+          Abreviaturas en el recuadro (organizadas sin amontonarse):
+        </p>
+        <div id="refbox-items-list" style="max-height: 140px; overflow-y: auto; margin-bottom: 10px;"></div>
+        
+        <div style="display: flex; gap: 4px; margin-bottom: 6px;">
+          <input type="text" id="ref-item-abbr" class="form-input" placeholder="Abrev (ej. TBS)" style="width: 45%;" />
+          <input type="text" id="ref-item-formula" class="form-input" placeholder="Fórmula" style="width: 55%;" />
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
+          <button class="btn btn-sm btn-primary" id="btn-add-ref-item" title="Añadir abreviatura a la lista">+ Añadir</button>
+          <button class="btn btn-sm btn-success" id="btn-draw-ref-item" style="font-weight: bold; background: #059669; border-color: #059669; color: #ffffff;" title="Abrir editor para dibujar o elegir la estructura de una nueva abreviatura">✏️ Dibujar</button>
+        </div>
+      </div>
+
+      <div class="panel-section" id="inspector-compound-box" style="display: none;">
+        <div class="panel-title">Recuadro de Compuesto</div>
+        <p style="font-size: 11px; color: #64748b; margin-bottom: 8px;">
+          Edita la incógnita central o encadena el siguiente paso:
+        </p>
+
+        <div class="compound-unknown-card" style="background: rgba(37, 99, 235, 0.08); border: 1px solid rgba(37, 99, 235, 0.25); border-radius: 6px; padding: 8px; margin-bottom: 10px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+            <span class="compound-unknown-title" style="font-size: 11px; font-weight: bold; color: #1e40af;">Incógnita Central:</span>
+            <span style="font-size: 10px; color: #64748b;">(ej. A, B, X...)</span>
+          </div>
+          <div style="display: flex; gap: 6px;">
+            <input type="text" id="input-compound-unknown" class="form-input" placeholder="A" maxlength="4" style="width: 45%; font-weight: bold; font-size: 16px; text-align: center; font-style: italic; font-family: 'Times New Roman', serif;" title="Letra central de incógnita (se actualiza en tiempo real al escribir)" />
+            <button class="btn btn-sm btn-primary" id="btn-update-compound-unknown" style="width: 55%; font-weight: bold;">✓ Fijar</button>
+          </div>
+          <div style="font-size: 10px; color: #64748b; margin-top: 4px;">
+            En vivo al teclear, o pulsa Fijar / Enter
+          </div>
+        </div>
+
+        <div style="margin-bottom: 10px; padding: 0 2px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+            <span style="font-size: 11px; font-weight: 600; color: #475569;">Descripción / Subtítulo:</span>
+            <span style="font-size: 10px; color: #64748b;">(ej. Nombre, P.f., rto.)</span>
+          </div>
+          <div style="display: flex; gap: 4px;">
+            <input type="text" id="input-compound-description" class="form-input" placeholder="ej. Ácido Cinámico" style="width: 65%; font-size: 12px;" title="Texto o nombre que aparecerá debajo del recuadro" />
+            <button class="btn btn-sm btn-outline" id="btn-update-compound-description" style="width: 35%; font-size: 11px;">Fijar</button>
+          </div>
+        </div>
+
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; padding: 0 2px;">
+          <span style="font-size: 11px; color: #64748b;">Rótulo de esquina:</span>
+          <div style="display: flex; gap: 4px; width: 45%;">
+            <input type="text" id="input-compound-label" class="form-input" placeholder="A" style="width: 50%; font-size: 12px; text-align: center;" title="Rótulo de esquina para orden del esquema" />
+            <button class="btn btn-sm" id="btn-update-compound-label" style="width: 50%; font-size: 11px;">Rótulo</button>
+          </div>
+        </div>
+
+        <div style="font-size: 11px; font-weight: 600; color: #475569; margin: 6px 0 3px;">Siguiente Paso en el Esquema:</div>
+        <button class="btn btn-sm btn-primary" id="btn-extend-problem-smart" style="width: 100%; margin-bottom: 6px; font-weight: bold;" title="Agrega la flecha en el eje seleccionado del recuadro (arriba, abajo, izquierda, derecha)">
+          ➕ Agregar Flecha / Paso Siguiente
+        </button>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 6px;">
+          <button class="btn btn-sm" id="btn-extend-problem-right" title="Extender reacción hacia la derecha">➔ Derecha</button>
+          <button class="btn btn-sm" id="btn-extend-problem-down" title="Extender reacción hacia abajo">⬇ Abajo</button>
+          <button class="btn btn-sm" id="btn-extend-problem-left" title="Extender reacción hacia la izquierda">⬅ Izquierda</button>
+          <button class="btn btn-sm" id="btn-extend-problem-up" title="Extender reacción hacia arriba">⬆ Arriba</button>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px;">
+          <button class="btn btn-sm" id="btn-fork-problem-step">🔀 Bifurcar Paso (1 ➔ 2)</button>
+          <button class="btn btn-sm" id="btn-converge-problem-step">⏩ Cerrar Bifurcación (2 ➔ 1)</button>
+          <button class="btn btn-sm btn-outline" id="btn-autofit-this-box">⤢ Auto-ajustar a Contenido</button>
+        </div>
+
+        <div style="margin-top: 8px; border-top: 1px dashed #cbd5e1; padding-top: 10px;">
+          <button class="btn btn-sm" id="btn-finish-problem-mode" style="width: 100%; background: #059669; color: #ffffff; border-color: #059669; font-weight: bold; padding: 7px 4px;" title="Finalizar el esquema de reacción y abrir/añadir la tabla de abreviaturas del problema">
+            🏁 Terminar Problema (Abreviaciones)
+          </button>
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <div class="panel-title">Guía ChemStudio Olimpiadas</div>
+        <ul style="font-size: 12px; color: #475569; padding-left: 16px; line-height: 1.6;">
+          <li><b>Clic Derecho</b>: Desplázate libremente por la pizarra (Pan).</li>
+          <li><b>Tecla 1 en enlace</b>: Cicla simple → doble → triple → discontinuo.</li>
+          <li><b>Tecla 1 en átomo</b>: Brota metilo → isopropilo → tert-butilo.</li>
+          <li><b>Modo Problema</b>: con un esquema ya dibujado, enmarca cada molécula y convierte las letras A, B... en incógnitas.</li>
+          <li><b>Blanco y negro</b>: quita los colores de los átomos para un examen más limpio.</li>
+        </ul>
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- Barra de estado -->
+  <footer class="status-bar">
+    <div class="status-left">
+      <div id="valence-status-badge" class="valence-badge ok">
+        <span id="valence-status-text">Valencias y reglas químicas correctas</span>
+      </div>
+      <div class="status-shortcut-hint">
+        <span>Atajos: <span class="kbd">1</span> C-C / Doble · <span class="kbd">O</span>/<span class="kbd">N</span> Elementos · <span class="kbd">+</span>/<span class="kbd">-</span> Carga · <span class="kbd">:</span> Pares · <span class="kbd">C</span> Silla · Clic Der: Pan</span>
+      </div>
+    </div>
+    <div>
+      <span>ChemStudio v1.4</span>
+    </div>
+  </footer>
+
+  <script src="js/bundle.js"></script>
+</body>
+</html>
