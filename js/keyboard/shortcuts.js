@@ -55,6 +55,24 @@ export class ChemShortcuts {
       return;
     }
 
+    // Copiar / Cortar / Pegar
+    if (isCtrl && (key === 'c' || key === 'x')) {
+      const clip = this.state.copySelection();
+      if (clip) {
+        e.preventDefault();
+        this.clipboard = clip;
+        this.pasteCount = 0;
+        if (key === 'x') this.deleteSelected();
+      }
+      return;
+    }
+
+    if (isCtrl && key === 'v') {
+      e.preventDefault();
+      this.paste();
+      return;
+    }
+
     // 2. Eliminar selección
     if (e.key === 'Delete' || e.key === 'Backspace') {
       e.preventDefault();
@@ -507,6 +525,28 @@ export class ChemShortcuts {
     });
 
     return newAtom;
+  }
+
+  /**
+   * Pega lo copiado centrado en el cursor si está sobre el lienzo; si no, desplazado
+   * 30 px respecto al original (cada pegado sucesivo se desplaza un poco más).
+   */
+  paste() {
+    if (!this.clipboard) return;
+    let dx, dy;
+    const cursor = this.app && this.app.lastCanvasPos;
+    if (cursor) {
+      const c = this.state.constructor.clipboardCenter(this.clipboard);
+      dx = cursor.x - c.x;
+      dy = cursor.y - c.y;
+    } else {
+      this.pasteCount = (this.pasteCount || 0) + 1;
+      dx = dy = 30 * this.pasteCount;
+    }
+    this.state.pasteClipboard(this.clipboard, dx, dy);
+    if (this.app && typeof this.app.selectTool === 'function') this.app.selectTool('select');
+    this.renderer.render();
+    if (this.app && this.app.updateValenceStatus) this.app.updateValenceStatus();
   }
 
   deleteSelected() {

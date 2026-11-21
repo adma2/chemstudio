@@ -4483,16 +4483,20 @@ class ChemState {
     }
   }
 
-  saveSnapshot() {
-    const snapshot = {
+  /** Estado actual serializado (lo que guarda un paso de Deshacer) */
+  makeSnapshot() {
+    return JSON.stringify({
       atoms: Array.from(this.atoms.values()).map(a => ({ ...a })),
       bonds: Array.from(this.bonds.values()).map(b => ({ ...b })),
       arrows: Array.from(this.arrows.values()).map(a => ({ ...a })),
       referenceBoxes: Array.from(this.referenceBoxes.values()).map(r => ({ ...r })),
       textLabels: Array.from(this.textLabels.values()).map(l => ({ ...l }))
-    };
+    });
+  }
 
-    this.undoStack.push(JSON.stringify(snapshot));
+  /** Guarda un paso de Deshacer; 'snapshot' permite guardar uno tomado antes (p. ej. al empezar a arrastrar) */
+  saveSnapshot(snapshot = this.makeSnapshot()) {
+    this.undoStack.push(snapshot);
     if (this.undoStack.length > this.maxHistory) {
       this.undoStack.shift();
     }
@@ -4848,6 +4852,70 @@ class ChemState {
   removeTextLabel(id) {
     this.textLabels.delete(id);
     this.selected.labels.delete(id);
+  }
+
+  // --- Copiar y pegar ---
+  /**
+   * Copia lo seleccionado: átomos (con los enlaces entre ellos), flechas y rótulos.
+   * Devuelve null si no hay nada que copiar.
+   */
+  copySelection() {
+    const sel = this.selected;
+    const atomIds = new Set(sel.atoms);
+    // Un enlace seleccionado arrastra sus dos átomos
+    for (const bId of sel.bonds) {
+      const b = this.bonds.get(bId);
+      if (b) { atomIds.add(b.atom1); atomIds.add(b.atom2); }
+    }
+    const atoms = [...atomIds].map(id => this.atoms.get(id)).filter(Boolean);
+    const bonds = [...this.bonds.values()].filter(b => atomIds.has(b.atom1) && atomIds.has(b.atom2));
+    const arrows = [...sel.arrows].map(id => this.arrows.get(id)).filter(Boolean);
+    const labels = [...sel.labels].map(id => this.textLabels.get(id)).filter(Boolean);
+    if (atoms.length + arrows.length + labels.length === 0) return null;
+    return JSON.parse(JSON.stringify({ atoms, bonds, arrows, labels }));
+  }
+
+  /** Centro del contenido copiado (para pegarlo centrado en el cursor) */
+  static clipboardCenter(clip) {
+    const xs = [], ys = [];
+    for (const a of clip.atoms) { xs.push(a.x); ys.push(a.y); }
+    for (const a of clip.arrows) { xs.push(a.x1, a.x2); ys.push(a.y1, a.y2); }
+    for (const l of clip.labels) { xs.push(l.x); ys.push(l.y); }
+    return { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 };
+  }
+
+  /**
+   * Pega una copia desplazada (dx, dy) con ids nuevos y deja seleccionado lo pegado.
+   * Guarda un paso de Deshacer.
+   */
+  pasteClipboard(clip, dx, dy) {
+    if (!clip) return;
+    this.saveSnapshot();
+    this.clearSelection();
+    const idMap = new Map();
+    for (const a of clip.atoms) {
+      const { id, ...rest } = a;
+      const added = this.addAtom({ ...rest, x: a.x + dx, y: a.y + dy });
+      idMap.set(id, added.id);
+      this.selected.atoms.add(added.id);
+    }
+    for (const b of clip.bonds) {
+      const { id, ...rest } = b;
+      const added = this.addBond({ ...rest, atom1: idMap.get(b.atom1), atom2: idMap.get(b.atom2) });
+      this.selected.bonds.add(added.id);
+    }
+    for (const a of clip.arrows) {
+      const { id, ...rest } = JSON.parse(JSON.stringify(a));
+      const added = this.addArrow({ ...rest, x1: a.x1 + dx, y1: a.y1 + dy, x2: a.x2 + dx, y2: a.y2 + dy });
+      this.selected.arrows.add(added.id);
+    }
+    for (const l of clip.labels) {
+      const { id, ...rest } = l;
+      const added = this.addTextLabel({ ...rest, x: l.x + dx, y: l.y + dy });
+      this.selected.labels.add(added.id);
+    }
+    this.updateValences();
+    this.emit('change');
   }
 
   // --- Limpieza y Selección ---
@@ -7546,6 +7614,7 @@ ReferenceBoxRenderer.thumbnailRenderer = (structObj, group, isDark) => {
  * select-tool.js - Herramienta de selección múltiple, desplazamiento y redimensionamiento
  */
 
+
 class SelectTool {
   constructor(state, renderer) {
     this.state = state;
@@ -7582,18 +7651,26 @@ class SelectTool {
       return;
     }
 
-    // 2. Si se hace clic sobre un elemento existente
+    // 2. Si se hace clic sobre un elemento existente. Si forma parte de la selección actual
+    //    (p. ej. un enlace de una molécula seleccionada con el recuadro, o el recuadro de
+    //    compuesto que la contiene), se arrastra toda la selección en vez de reemplazarla.
     if (targetInfo && targetInfo.id) {
-      const isShift = e.shiftKey;
-      this.handleElementClick(targetInfo, isShift);
-      this.isDragging = true;
-      this.dragStartPos = { x: canvasPos.x, y: canvasPos.y };
-      this.recordInitialPositions();
-      this.renderer.render();
+      if (!e.shiftKey && this.isPartOfSelection(targetInfo, canvasPos)) {
+        if (targetInfo.type === 'box') this.state.selected.boxes.add(targetInfo.id);
+      } else {
+        this.handleElementClick(targetInfo, e.shiftKey);
+      }
+      this.startDrag(canvasPos);
       return;
     }
 
-    // 3. Clic en espacio libre
+    // 3. Clic en espacio libre dentro de la selección: arrastrarla
+    if (!e.shiftKey && this.isInsideSelectionBounds(canvasPos)) {
+      this.startDrag(canvasPos);
+      return;
+    }
+
+    // 4. Clic en espacio libre
     if (!e.shiftKey) {
       this.state.clearSelection();
     }
@@ -7697,7 +7774,11 @@ class SelectTool {
     }
 
     if (this.isDragging) {
-      this.state.saveSnapshot();
+      // Deshacer debe volver a la posición de antes del arrastre (solo si algo se movió)
+      if (this.preDragSnapshot && this.state.makeSnapshot() !== this.preDragSnapshot) {
+        this.state.saveSnapshot(this.preDragSnapshot);
+      }
+      this.preDragSnapshot = null;
       this.isDragging = false;
       this.dragStartPos = null;
       this.activeResizeBox = null;
@@ -7749,6 +7830,56 @@ class SelectTool {
     }
   }
 
+  startDrag(canvasPos) {
+    this.preDragSnapshot = this.state.makeSnapshot();
+    this.isDragging = true;
+    this.dragStartPos = { x: canvasPos.x, y: canvasPos.y };
+    this.recordInitialPositions();
+    this.renderer.render();
+  }
+
+  /** Rectángulo que rodea los átomos, flechas y rótulos seleccionados (null si no hay) */
+  getSelectionBounds() {
+    const sel = this.state.selected;
+    const xs = [], ys = [];
+    for (const id of sel.atoms) {
+      const a = this.state.getAtom(id);
+      if (a) { xs.push(a.x); ys.push(a.y); }
+    }
+    for (const id of sel.arrows) {
+      const a = this.state.arrows.get(id);
+      if (a) { xs.push(a.x1, a.x2); ys.push(a.y1, a.y2); }
+    }
+    for (const id of sel.labels) {
+      const l = this.state.textLabels.get(id);
+      if (l) { xs.push(l.x); ys.push(l.y); }
+    }
+    if (xs.length === 0) return null;
+    return { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) };
+  }
+
+  /** ¿El punto cae sobre la zona de la selección? (margen para etiquetas como OH o Br) */
+  isInsideSelectionBounds(pos, margin = 15) {
+    const b = this.getSelectionBounds();
+    if (!b) return false;
+    return pos.x >= b.minX - margin && pos.x <= b.maxX + margin &&
+           pos.y >= b.minY - margin && pos.y <= b.maxY + margin;
+  }
+
+  /** ¿El elemento clicado pertenece a la selección actual, de modo que hay que arrastrarla entera? */
+  isPartOfSelection(targetInfo, pos) {
+    const sel = this.state.selected;
+    if (targetInfo.type === 'bond') {
+      const b = this.state.bonds.get(targetInfo.id);
+      return Boolean(b && sel.atoms.has(b.atom1) && sel.atoms.has(b.atom2));
+    }
+    if (targetInfo.type === 'box') {
+      const box = this.state.referenceBoxes.get(targetInfo.id);
+      return Boolean(box && box.boxType === 'compound' && this.isInsideSelectionBounds(pos));
+    }
+    return false;
+  }
+
   recordInitialPositions() {
     this.initialPositions = new Map([
       ['atoms', new Map()],
@@ -7757,7 +7888,20 @@ class SelectTool {
       ['boxes', new Map()]
     ]);
 
-    for (const id of this.state.selected.atoms) {
+    // Átomos que se mueven: los seleccionados, los extremos de los enlaces seleccionados
+    // y la molécula que contiene cada recuadro de compuesto seleccionado
+    const atomIds = new Set(this.state.selected.atoms);
+    for (const id of this.state.selected.bonds) {
+      const b = this.state.bonds.get(id);
+      if (b) { atomIds.add(b.atom1); atomIds.add(b.atom2); }
+    }
+    for (const id of this.state.selected.boxes) {
+      const box = this.state.referenceBoxes.get(id);
+      if (box && box.boxType === 'compound') {
+        for (const a of ProblemBuilder.getAtomsInsideBox(box, this.state)) atomIds.add(a.id);
+      }
+    }
+    for (const id of atomIds) {
       const a = this.state.getAtom(id);
       if (a) this.initialPositions.get('atoms').set(id, { x: a.x, y: a.y });
     }
@@ -9404,6 +9548,24 @@ class ChemShortcuts {
       return;
     }
 
+    // Copiar / Cortar / Pegar
+    if (isCtrl && (key === 'c' || key === 'x')) {
+      const clip = this.state.copySelection();
+      if (clip) {
+        e.preventDefault();
+        this.clipboard = clip;
+        this.pasteCount = 0;
+        if (key === 'x') this.deleteSelected();
+      }
+      return;
+    }
+
+    if (isCtrl && key === 'v') {
+      e.preventDefault();
+      this.paste();
+      return;
+    }
+
     // 2. Eliminar selección
     if (e.key === 'Delete' || e.key === 'Backspace') {
       e.preventDefault();
@@ -9856,6 +10018,28 @@ class ChemShortcuts {
     });
 
     return newAtom;
+  }
+
+  /**
+   * Pega lo copiado centrado en el cursor si está sobre el lienzo; si no, desplazado
+   * 30 px respecto al original (cada pegado sucesivo se desplaza un poco más).
+   */
+  paste() {
+    if (!this.clipboard) return;
+    let dx, dy;
+    const cursor = this.app && this.app.lastCanvasPos;
+    if (cursor) {
+      const c = this.state.constructor.clipboardCenter(this.clipboard);
+      dx = cursor.x - c.x;
+      dy = cursor.y - c.y;
+    } else {
+      this.pasteCount = (this.pasteCount || 0) + 1;
+      dx = dy = 30 * this.pasteCount;
+    }
+    this.state.pasteClipboard(this.clipboard, dx, dy);
+    if (this.app && typeof this.app.selectTool === 'function') this.app.selectTool('select');
+    this.renderer.render();
+    if (this.app && this.app.updateValenceStatus) this.app.updateValenceStatus();
   }
 
   deleteSelected() {
@@ -10699,6 +10883,10 @@ class ChemApp {
 
       const canvasPos = this.getCanvasCoordinates(e);
       const targetInfo = this.getTargetInfo(e);
+
+      // Posición del cursor sobre el lienzo (Ctrl+V pega ahí); null si está fuera del lienzo
+      const overCanvas = e.target && typeof e.target.closest === 'function' && e.target.closest('#chem-canvas');
+      this.lastCanvasPos = overCanvas ? canvasPos : null;
 
       this.renderer.hoveredAtomId = targetInfo && targetInfo.type === 'atom' ? targetInfo.id : null;
       this.renderer.hoveredBondId = targetInfo && targetInfo.type === 'bond' ? targetInfo.id : null;

@@ -1849,3 +1849,68 @@ console.log('\n--- TEST REVISIÓN: atajos, deshacer, guardar/abrir y flecha en L
   console.assert(known.join(',') === '1,2', `IChO con flecha en L: conocidas ${known}`);
   console.log('✓ S/B/G, Supr vacío, JSON inválido, guardar recuadros y flecha en L');
 }
+
+console.log('\n--- TEST: Copiar y pegar (Ctrl+C / Ctrl+V) ---');
+{
+  const cp = new ChemState();
+  const a = cp.addAtom({ x: 0, y: 0, element: 'C' });
+  const o = cp.addAtom({ x: 38, y: 0, element: 'O' });
+  const far = cp.addAtom({ x: 500, y: 500, element: 'N' });
+  cp.addBond({ atom1: a.id, atom2: o.id, type: 'double' });
+  cp.addBond({ atom1: o.id, atom2: far.id, type: 'single' });
+  const arr = cp.addArrow({ x1: 60, y1: 0, x2: 160, y2: 0, reagentsTop: 'Mg' });
+  cp.selected.atoms.add(a.id); cp.selected.atoms.add(o.id); cp.selected.arrows.add(arr.id);
+
+  const clip = cp.copySelection();
+  console.assert(clip.atoms.length === 2 && clip.bonds.length === 1, 'Solo se copian los enlaces entre átomos seleccionados');
+  cp.pasteClipboard(clip, 0, 100);
+  console.assert(cp.atoms.size === 5 && cp.bonds.size === 3 && cp.arrows.size === 2, 'Pegar añade copias');
+  const pasted = [...cp.selected.atoms].map(id => cp.atoms.get(id));
+  console.assert(pasted.length === 2 && pasted.every(p => p.y === 100), 'Lo pegado queda seleccionado y desplazado');
+  const pastedBond = cp.bonds.get([...cp.selected.bonds][0]);
+  console.assert(pastedBond.type === 'double' && cp.selected.atoms.has(pastedBond.atom1) && cp.selected.atoms.has(pastedBond.atom2), 'El enlace pegado une los átomos nuevos');
+  const pastedArrow = cp.arrows.get([...cp.selected.arrows][0]);
+  console.assert(pastedArrow.y1 === 100 && pastedArrow.reagentsTop === 'Mg', 'La flecha pegada conserva sus reactivos');
+  console.assert(JSON.stringify(ChemState.clipboardCenter(clip)) === '{"x":80,"y":0}', 'Centro del portapapeles');
+  cp.undo();
+  console.assert(cp.atoms.size === 3 && cp.arrows.size === 1, 'Deshacer quita lo pegado');
+  cp.clearSelection();
+  console.assert(cp.copySelection() === null, 'Sin selección no se copia nada');
+  console.log('✓ Ctrl+C / Ctrl+V copian moléculas, enlaces y flechas con ids nuevos');
+}
+console.log('\n--- TEST: Arrastrar una molécula seleccionada con el recuadro ---');
+{
+  const { SelectTool } = await import('../js/tools/select-tool.js');
+  const st = new ChemState();
+  const a1 = st.addAtom({ x: 100, y: 100, element: 'C' });
+  const a2 = st.addAtom({ x: 138, y: 100, element: 'C' });
+  const bond = st.addBond({ atom1: a1.id, atom2: a2.id });
+  const box = st.addReferenceBox({ boxType: 'compound', label: 'A', x: 60, y: 60, width: 140, height: 80 });
+  const tool = new SelectTool(st, { render() {}, svg: null });
+  // Selección por recuadro: solo marca los átomos
+  st.selected.atoms.add(a1.id); st.selected.atoms.add(a2.id);
+
+  // Agarrar por el enlace mueve toda la molécula
+  tool.onMouseDown({ shiftKey: false }, { x: 119, y: 100 }, { type: 'bond', id: bond.id });
+  tool.onMouseMove({}, { x: 119, y: 150 }, null);
+  tool.onMouseUp({}, { x: 119, y: 150 }, null);
+  console.assert(st.selected.atoms.size === 2, 'La selección se conserva al agarrar un enlace');
+  console.assert(a1.y === 150 && a2.y === 150, 'Agarrar un enlace de la selección mueve la molécula');
+  st.undo();
+  console.assert(st.atoms.get(a1.id).y === 100, 'Deshacer devuelve la molécula a su sitio');
+
+  // Agarrar por dentro del recuadro de compuesto mueve la molécula y el recuadro
+  const s2 = st.atoms;
+  st.selected.atoms.add(a1.id); st.selected.atoms.add(a2.id);
+  tool.onMouseDown({ shiftKey: false }, { x: 120, y: 110 }, { type: 'box', id: box.id });
+  tool.onMouseMove({}, { x: 170, y: 110 }, null);
+  tool.onMouseUp({}, { x: 170, y: 110 }, null);
+  console.assert(s2.get(a1.id).x === 150 && st.referenceBoxes.get(box.id).x === 110, 'El recuadro y su molécula se mueven juntos');
+
+  // Un clic sin mover no deja un paso vacío en Deshacer
+  const before = st.undoStack.length;
+  tool.onMouseDown({ shiftKey: false }, { x: 150, y: 100 }, { type: 'atom', id: a1.id });
+  tool.onMouseUp({}, { x: 150, y: 100 }, null);
+  console.assert(st.undoStack.length === before, 'Clic sin mover no guarda paso de Deshacer');
+  console.log('✓ La selección se arrastra desde un enlace, el recuadro o su interior');
+}

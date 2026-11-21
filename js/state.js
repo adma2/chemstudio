@@ -69,16 +69,20 @@ export class ChemState {
     }
   }
 
-  saveSnapshot() {
-    const snapshot = {
+  /** Estado actual serializado (lo que guarda un paso de Deshacer) */
+  makeSnapshot() {
+    return JSON.stringify({
       atoms: Array.from(this.atoms.values()).map(a => ({ ...a })),
       bonds: Array.from(this.bonds.values()).map(b => ({ ...b })),
       arrows: Array.from(this.arrows.values()).map(a => ({ ...a })),
       referenceBoxes: Array.from(this.referenceBoxes.values()).map(r => ({ ...r })),
       textLabels: Array.from(this.textLabels.values()).map(l => ({ ...l }))
-    };
+    });
+  }
 
-    this.undoStack.push(JSON.stringify(snapshot));
+  /** Guarda un paso de Deshacer; 'snapshot' permite guardar uno tomado antes (p. ej. al empezar a arrastrar) */
+  saveSnapshot(snapshot = this.makeSnapshot()) {
+    this.undoStack.push(snapshot);
     if (this.undoStack.length > this.maxHistory) {
       this.undoStack.shift();
     }
@@ -434,6 +438,70 @@ export class ChemState {
   removeTextLabel(id) {
     this.textLabels.delete(id);
     this.selected.labels.delete(id);
+  }
+
+  // --- Copiar y pegar ---
+  /**
+   * Copia lo seleccionado: átomos (con los enlaces entre ellos), flechas y rótulos.
+   * Devuelve null si no hay nada que copiar.
+   */
+  copySelection() {
+    const sel = this.selected;
+    const atomIds = new Set(sel.atoms);
+    // Un enlace seleccionado arrastra sus dos átomos
+    for (const bId of sel.bonds) {
+      const b = this.bonds.get(bId);
+      if (b) { atomIds.add(b.atom1); atomIds.add(b.atom2); }
+    }
+    const atoms = [...atomIds].map(id => this.atoms.get(id)).filter(Boolean);
+    const bonds = [...this.bonds.values()].filter(b => atomIds.has(b.atom1) && atomIds.has(b.atom2));
+    const arrows = [...sel.arrows].map(id => this.arrows.get(id)).filter(Boolean);
+    const labels = [...sel.labels].map(id => this.textLabels.get(id)).filter(Boolean);
+    if (atoms.length + arrows.length + labels.length === 0) return null;
+    return JSON.parse(JSON.stringify({ atoms, bonds, arrows, labels }));
+  }
+
+  /** Centro del contenido copiado (para pegarlo centrado en el cursor) */
+  static clipboardCenter(clip) {
+    const xs = [], ys = [];
+    for (const a of clip.atoms) { xs.push(a.x); ys.push(a.y); }
+    for (const a of clip.arrows) { xs.push(a.x1, a.x2); ys.push(a.y1, a.y2); }
+    for (const l of clip.labels) { xs.push(l.x); ys.push(l.y); }
+    return { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 };
+  }
+
+  /**
+   * Pega una copia desplazada (dx, dy) con ids nuevos y deja seleccionado lo pegado.
+   * Guarda un paso de Deshacer.
+   */
+  pasteClipboard(clip, dx, dy) {
+    if (!clip) return;
+    this.saveSnapshot();
+    this.clearSelection();
+    const idMap = new Map();
+    for (const a of clip.atoms) {
+      const { id, ...rest } = a;
+      const added = this.addAtom({ ...rest, x: a.x + dx, y: a.y + dy });
+      idMap.set(id, added.id);
+      this.selected.atoms.add(added.id);
+    }
+    for (const b of clip.bonds) {
+      const { id, ...rest } = b;
+      const added = this.addBond({ ...rest, atom1: idMap.get(b.atom1), atom2: idMap.get(b.atom2) });
+      this.selected.bonds.add(added.id);
+    }
+    for (const a of clip.arrows) {
+      const { id, ...rest } = JSON.parse(JSON.stringify(a));
+      const added = this.addArrow({ ...rest, x1: a.x1 + dx, y1: a.y1 + dy, x2: a.x2 + dx, y2: a.y2 + dy });
+      this.selected.arrows.add(added.id);
+    }
+    for (const l of clip.labels) {
+      const { id, ...rest } = l;
+      const added = this.addTextLabel({ ...rest, x: l.x + dx, y: l.y + dy });
+      this.selected.labels.add(added.id);
+    }
+    this.updateValences();
+    this.emit('change');
   }
 
   // --- Limpieza y Selección ---

@@ -92,6 +92,7 @@ Herramientas (sin el cursor sobre un átomo):
 | `R` | Recuadro de referencias |
 | `E` | Borrador |
 | `Ctrl+Z` / `Ctrl+Y` | Deshacer / Rehacer |
+| `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copiar / cortar / pegar (se pega donde está el cursor) |
 | `Supr` | Borrar la selección |
 | Clic derecho + arrastrar | Desplazar el lienzo |
 | Rueda del ratón | Zoom |

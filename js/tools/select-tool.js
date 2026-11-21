@@ -2,6 +2,8 @@
  * select-tool.js - Herramienta de selección múltiple, desplazamiento y redimensionamiento
  */
 
+import { ProblemBuilder } from '../chem-engine/problem-builder.js';
+
 export class SelectTool {
   constructor(state, renderer) {
     this.state = state;
@@ -38,18 +40,26 @@ export class SelectTool {
       return;
     }
 
-    // 2. Si se hace clic sobre un elemento existente
+    // 2. Si se hace clic sobre un elemento existente. Si forma parte de la selección actual
+    //    (p. ej. un enlace de una molécula seleccionada con el recuadro, o el recuadro de
+    //    compuesto que la contiene), se arrastra toda la selección en vez de reemplazarla.
     if (targetInfo && targetInfo.id) {
-      const isShift = e.shiftKey;
-      this.handleElementClick(targetInfo, isShift);
-      this.isDragging = true;
-      this.dragStartPos = { x: canvasPos.x, y: canvasPos.y };
-      this.recordInitialPositions();
-      this.renderer.render();
+      if (!e.shiftKey && this.isPartOfSelection(targetInfo, canvasPos)) {
+        if (targetInfo.type === 'box') this.state.selected.boxes.add(targetInfo.id);
+      } else {
+        this.handleElementClick(targetInfo, e.shiftKey);
+      }
+      this.startDrag(canvasPos);
       return;
     }
 
-    // 3. Clic en espacio libre
+    // 3. Clic en espacio libre dentro de la selección: arrastrarla
+    if (!e.shiftKey && this.isInsideSelectionBounds(canvasPos)) {
+      this.startDrag(canvasPos);
+      return;
+    }
+
+    // 4. Clic en espacio libre
     if (!e.shiftKey) {
       this.state.clearSelection();
     }
@@ -153,7 +163,11 @@ export class SelectTool {
     }
 
     if (this.isDragging) {
-      this.state.saveSnapshot();
+      // Deshacer debe volver a la posición de antes del arrastre (solo si algo se movió)
+      if (this.preDragSnapshot && this.state.makeSnapshot() !== this.preDragSnapshot) {
+        this.state.saveSnapshot(this.preDragSnapshot);
+      }
+      this.preDragSnapshot = null;
       this.isDragging = false;
       this.dragStartPos = null;
       this.activeResizeBox = null;
@@ -205,6 +219,56 @@ export class SelectTool {
     }
   }
 
+  startDrag(canvasPos) {
+    this.preDragSnapshot = this.state.makeSnapshot();
+    this.isDragging = true;
+    this.dragStartPos = { x: canvasPos.x, y: canvasPos.y };
+    this.recordInitialPositions();
+    this.renderer.render();
+  }
+
+  /** Rectángulo que rodea los átomos, flechas y rótulos seleccionados (null si no hay) */
+  getSelectionBounds() {
+    const sel = this.state.selected;
+    const xs = [], ys = [];
+    for (const id of sel.atoms) {
+      const a = this.state.getAtom(id);
+      if (a) { xs.push(a.x); ys.push(a.y); }
+    }
+    for (const id of sel.arrows) {
+      const a = this.state.arrows.get(id);
+      if (a) { xs.push(a.x1, a.x2); ys.push(a.y1, a.y2); }
+    }
+    for (const id of sel.labels) {
+      const l = this.state.textLabels.get(id);
+      if (l) { xs.push(l.x); ys.push(l.y); }
+    }
+    if (xs.length === 0) return null;
+    return { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) };
+  }
+
+  /** ¿El punto cae sobre la zona de la selección? (margen para etiquetas como OH o Br) */
+  isInsideSelectionBounds(pos, margin = 15) {
+    const b = this.getSelectionBounds();
+    if (!b) return false;
+    return pos.x >= b.minX - margin && pos.x <= b.maxX + margin &&
+           pos.y >= b.minY - margin && pos.y <= b.maxY + margin;
+  }
+
+  /** ¿El elemento clicado pertenece a la selección actual, de modo que hay que arrastrarla entera? */
+  isPartOfSelection(targetInfo, pos) {
+    const sel = this.state.selected;
+    if (targetInfo.type === 'bond') {
+      const b = this.state.bonds.get(targetInfo.id);
+      return Boolean(b && sel.atoms.has(b.atom1) && sel.atoms.has(b.atom2));
+    }
+    if (targetInfo.type === 'box') {
+      const box = this.state.referenceBoxes.get(targetInfo.id);
+      return Boolean(box && box.boxType === 'compound' && this.isInsideSelectionBounds(pos));
+    }
+    return false;
+  }
+
   recordInitialPositions() {
     this.initialPositions = new Map([
       ['atoms', new Map()],
@@ -213,7 +277,20 @@ export class SelectTool {
       ['boxes', new Map()]
     ]);
 
-    for (const id of this.state.selected.atoms) {
+    // Átomos que se mueven: los seleccionados, los extremos de los enlaces seleccionados
+    // y la molécula que contiene cada recuadro de compuesto seleccionado
+    const atomIds = new Set(this.state.selected.atoms);
+    for (const id of this.state.selected.bonds) {
+      const b = this.state.bonds.get(id);
+      if (b) { atomIds.add(b.atom1); atomIds.add(b.atom2); }
+    }
+    for (const id of this.state.selected.boxes) {
+      const box = this.state.referenceBoxes.get(id);
+      if (box && box.boxType === 'compound') {
+        for (const a of ProblemBuilder.getAtomsInsideBox(box, this.state)) atomIds.add(a.id);
+      }
+    }
+    for (const id of atomIds) {
       const a = this.state.getAtom(id);
       if (a) this.initialPositions.get('atoms').set(id, { x: a.x, y: a.y });
     }

@@ -554,6 +554,10 @@ export class ChemApp {
       const canvasPos = this.getCanvasCoordinates(e);
       const targetInfo = this.getTargetInfo(e);
 
+      // Posición del cursor sobre el lienzo (Ctrl+V pega ahí); null si está fuera del lienzo
+      const overCanvas = e.target && typeof e.target.closest === 'function' && e.target.closest('#chem-canvas');
+      this.lastCanvasPos = overCanvas ? canvasPos : null;
+
       this.renderer.hoveredAtomId = targetInfo && targetInfo.type === 'atom' ? targetInfo.id : null;
       this.renderer.hoveredBondId = targetInfo && targetInfo.type === 'bond' ? targetInfo.id : null;
 
