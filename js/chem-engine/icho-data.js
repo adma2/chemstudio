@@ -152,7 +152,7 @@ export const ICHO_GLUCOSE_SCHEME = {
     },
     {
       id: "arr_b_to_inter",
-      x1: 445,
+      x1: 460,
       y1: 185,
       // Flecha doblada en L: baja desde B y gira hacia el glucósido de abajo
       x2: 556,
@@ -192,7 +192,7 @@ export const ICHO_GLUCOSE_SCHEME = {
   ],
   textLabels: [
     { id: "lbl_a", x: 320, y: 160, text: "A", isIntermediary: true },
-    { id: "lbl_b", x: 445, y: 160, text: "B", isIntermediary: true },
+    { id: "lbl_b", x: 460, y: 160, text: "B", isIntermediary: true },
     { id: "lbl_c", x: 600, y: 160, text: "C", isIntermediary: true },
     { id: "lbl_d", x: 740, y: 160, text: "D", isIntermediary: true },
     { id: "lbl_f", x: 126, y: 345, text: "F", isIntermediary: true },
