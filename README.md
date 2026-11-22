@@ -6,7 +6,7 @@ ChemStudio sirve para dibujar rutas sintéticas de química orgánica y converti
 
 ### **[▶ Probar ChemStudio en línea](https://adma2.github.io/chemstudio/)**
 
-![Captura de ChemStudio con un esquema de síntesis a partir de glucosa](docs/screenshot.png)
+![Captura de ChemStudio con un esquema de síntesis a partir de glucosa](docs/screenshot-v1.4.png)
 
 ---
 
