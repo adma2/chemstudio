@@ -906,7 +906,7 @@ export class ChemApp {
         monoBtn.classList.toggle('active', on);
         monoBtn.style.background = on ? '#2563eb' : '';
         monoBtn.style.color = on ? '#ffffff' : '';
-        monoBtn.textContent = on ? '◐ Blanco y negro (On)' : '◐ Blanco y negro';
+        monoBtn.textContent = '◐ Blanco y\u00a0negro';
       }
       this.renderer.render();
     };
@@ -979,7 +979,7 @@ export class ChemApp {
       if (this.state.isProblemMode) {
         problemModeBtn.style.background = '#2563eb';
         problemModeBtn.style.color = '#ffffff';
-        problemModeBtn.textContent = 'Modo Problema (Activo)';
+        problemModeBtn.textContent = 'Modo Problema';
         this.selectTool('arrow');
         // Asegurar que los recuadros estén visibles
         this.state.showCompoundBoxes = true;

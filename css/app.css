@@ -169,6 +169,31 @@ body {
   border-bottom-right-radius: 6px;
 }
 
+/* Barra superior: misma altura en todos los grupos y sin saltos al cambiar un botón de estado */
+.header .btn-group {
+  height: 40px;
+}
+
+.header .btn-group .btn {
+  justify-content: center;
+  text-align: center;
+  line-height: 1.2;
+}
+
+#btn-toggle-problem-mode,
+#btn-toggle-boxes-visibility,
+#btn-toggle-dark-mode {
+  width: 82px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 1500px) {
+  .header .btn-group .btn {
+    padding: 2px 5px;
+    font-size: 11px;
+  }
+}
+
 /* Área de Trabajo Principal */
 .workspace {
   flex: 1;
