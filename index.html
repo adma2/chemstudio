@@ -356,7 +356,7 @@
             <span style="font-size: 10px; color: #64748b;">(ej. A, B, X...)</span>
           </div>
           <div style="display: flex; gap: 6px;">
-            <input type="text" id="input-compound-unknown" class="form-input" placeholder="A" maxlength="4" style="width: 45%; font-weight: bold; font-size: 16px; text-align: center; font-style: italic; font-family: 'Times New Roman', serif;" title="Letra central de incógnita (se actualiza en tiempo real al escribir)" />
+            <input type="text" id="input-compound-unknown" class="form-input" placeholder="A" maxlength="4" style="width: 45%; font-weight: bold; font-size: 16px; text-align: center;" title="Letra central de incógnita (se actualiza en tiempo real al escribir)" />
             <button class="btn btn-sm btn-primary" id="btn-update-compound-unknown" style="width: 55%; font-weight: bold;">✓ Fijar</button>
           </div>
           <div style="font-size: 10px; color: #64748b; margin-top: 4px;">
@@ -392,6 +392,18 @@
           <button class="btn btn-sm" id="btn-extend-problem-down" title="Extender reacción hacia abajo">⬇ Abajo</button>
           <button class="btn btn-sm" id="btn-extend-problem-left" title="Extender reacción hacia la izquierda">⬅ Izquierda</button>
           <button class="btn btn-sm" id="btn-extend-problem-up" title="Extender reacción hacia arriba">⬆ Arriba</button>
+        </div>
+
+        <div style="font-size: 11px; font-weight: 600; color: #475569; margin: 6px 0 3px;">↴ Flecha doblada en L:</div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 6px;">
+          <button class="btn btn-sm" data-bent-step="down right" title="Flecha doblada: sale hacia abajo y gira hacia la derecha">⬇ Abajo + Der.</button>
+          <button class="btn btn-sm" data-bent-step="right down" title="Flecha doblada: sale hacia la derecha y gira hacia abajo">➔ Der. + Abajo</button>
+          <button class="btn btn-sm" data-bent-step="down left" title="Flecha doblada: sale hacia abajo y gira hacia la izquierda">⬇ Abajo + Izq.</button>
+          <button class="btn btn-sm" data-bent-step="left down" title="Flecha doblada: sale hacia la izquierda y gira hacia abajo">⬅ Izq. + Abajo</button>
+          <button class="btn btn-sm" data-bent-step="up right" title="Flecha doblada: sale hacia arriba y gira hacia la derecha">⬆ Arriba + Der.</button>
+          <button class="btn btn-sm" data-bent-step="right up" title="Flecha doblada: sale hacia la derecha y gira hacia arriba">➔ Der. + Arriba</button>
+          <button class="btn btn-sm" data-bent-step="up left" title="Flecha doblada: sale hacia arriba y gira hacia la izquierda">⬆ Arriba + Izq.</button>
+          <button class="btn btn-sm" data-bent-step="left up" title="Flecha doblada: sale hacia la izquierda y gira hacia arriba">⬅ Izq. + Arriba</button>
         </div>
 
         <div style="display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px;">

@@ -287,32 +287,41 @@ export class ReferenceBoxRenderer {
       }
     }
 
-    // 3. Etiqueta de esquina (A, B, C...): identifica el recuadro y se dibuja si hay molécula.
-    //    En una incógnita vacía no se repite (la letra grande ya la muestra). El rótulo escrito
-    //    por el usuario se dibuja aparte, debajo de la molécula.
-    if (label && label.trim() !== '' && hasAtoms) {
+    // 3. Etiqueta de esquina (A, B, C...): identifica el recuadro, tenga molécula o incógnita.
+    //    En las incógnitas es solo una ayuda de edición: no se exporta, porque la letra grande ya
+    //    nombra el compuesto. El rótulo escrito por el usuario se dibuja debajo de la molécula.
+    if (label && label.trim() !== '') {
+      const badge = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      badge.setAttribute('class', `corner-badge ${hasAtoms ? '' : 'corner-badge-unknown'}`);
+      // En recuadros compactos la pastilla va centrada en la esquina (y algo menor, para no tapar la letra)
+      const compact = width < 90 || height < 80;
+      const badgeW = compact ? Math.max(18, label.trim().length * 8 + 8) : Math.max(24, label.trim().length * 9 + 10);
+      const badgeH = compact ? 18 : 22;
+      const badgeX = compact ? x - badgeW / 2 : x + 8;
+      const badgeY = compact ? y - badgeH / 2 : y + 8;
       // Pastilla de fondo para la letra
       const badgeBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-      badgeBg.setAttribute('x', x + 8);
-      badgeBg.setAttribute('y', y + 8);
-      badgeBg.setAttribute('width', '24');
-      badgeBg.setAttribute('height', '22');
+      badgeBg.setAttribute('x', badgeX);
+      badgeBg.setAttribute('y', badgeY);
+      badgeBg.setAttribute('width', badgeW);
+      badgeBg.setAttribute('height', badgeH);
       badgeBg.setAttribute('rx', '4');
       badgeBg.setAttribute('fill', isDark ? '#1e293b' : '#f1f5f9');
       badgeBg.setAttribute('stroke', isDark ? '#334155' : '#cbd5e1');
       badgeBg.setAttribute('stroke-width', '1');
-      group.appendChild(badgeBg);
+      badge.appendChild(badgeBg);
 
       const labelText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-      labelText.setAttribute('x', x + 20);
-      labelText.setAttribute('y', y + 24);
+      labelText.setAttribute('x', badgeX + badgeW / 2);
+      labelText.setAttribute('y', badgeY + badgeH / 2 + (compact ? 4.3 : 5));
       labelText.setAttribute('text-anchor', 'middle');
       labelText.setAttribute('font-family', 'Arial, Helvetica, sans-serif');
-      labelText.setAttribute('font-size', '14');
+      labelText.setAttribute('font-size', compact ? '12' : '14');
       labelText.setAttribute('font-weight', 'bold');
       labelText.setAttribute('fill', isDark ? '#f8fafc' : '#0f172a');
       labelText.textContent = label;
-      group.appendChild(labelText);
+      badge.appendChild(labelText);
+      group.appendChild(badge);
     }
 
     // 4. Letra incógnita grande central de olimpiadas (A, B, C...) si el recuadro está vacío
@@ -320,12 +329,11 @@ export class ReferenceBoxRenderer {
     if (!hasAtoms && letterToDisplay) {
       const unknownText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
       unknownText.setAttribute('x', x + width / 2);
-      unknownText.setAttribute('y', y + height / 2 + 12);
+      unknownText.setAttribute('y', y + height / 2 + 8);
       unknownText.setAttribute('text-anchor', 'middle');
-      unknownText.setAttribute('font-family', "'Times New Roman', Times, Georgia, serif");
-      unknownText.setAttribute('font-size', '38');
+      unknownText.setAttribute('font-family', 'Arial, Helvetica, sans-serif');
+      unknownText.setAttribute('font-size', '22'); // igual que las letras sueltas de los ejemplos
       unknownText.setAttribute('font-weight', 'bold');
-      unknownText.setAttribute('font-style', 'italic');
       unknownText.setAttribute('fill', isDark ? '#ffffff' : '#0f172a');
       unknownText.setAttribute('pointer-events', 'none');
       unknownText.textContent = letterToDisplay;
@@ -429,8 +437,8 @@ export class ReferenceBoxRenderer {
     if (!box.description || !String(box.description).trim()) return null;
     const isDark = Boolean(state && state.isDarkMode);
     const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    const letterBaseline = box.y + box.height / 2 + 12;
-    const y = hasAtoms ? box.y + box.height + this.descriptionOffset(box, hasAtoms) : letterBaseline + 22;
+    const letterBaseline = box.y + box.height / 2 + 8;
+    const y = hasAtoms ? box.y + box.height + this.descriptionOffset(box, hasAtoms) : letterBaseline + 18;
     text.setAttribute('x', box.x + box.width / 2);
     text.setAttribute('y', y);
     text.setAttribute('text-anchor', 'middle');
@@ -483,12 +491,11 @@ export class ReferenceBoxRenderer {
 
     const unknownText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     unknownText.setAttribute('x', x + width / 2);
-    unknownText.setAttribute('y', y + height / 2 + 12);
+    unknownText.setAttribute('y', y + height / 2 + 8);
     unknownText.setAttribute('text-anchor', 'middle');
-    unknownText.setAttribute('font-family', "'Times New Roman', Times, Georgia, serif");
-    unknownText.setAttribute('font-size', '38');
+    unknownText.setAttribute('font-family', 'Arial, Helvetica, sans-serif');
+    unknownText.setAttribute('font-size', '22'); // igual que las letras sueltas de los ejemplos
     unknownText.setAttribute('font-weight', 'bold');
-    unknownText.setAttribute('font-style', 'italic');
     unknownText.setAttribute('fill', isDark ? '#ffffff' : '#0f172a');
     unknownText.setAttribute('pointer-events', 'none');
     unknownText.textContent = unknownLetter || 'A';

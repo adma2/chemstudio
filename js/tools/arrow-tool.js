@@ -532,6 +532,21 @@ export class ArrowTool {
       reagentsTop: '',
       reagentsBottom: ''
     });
+    // Modo Problema: si sale de un recuadro y no llega a otro, crear el recuadro de destino
+    if (this.state.isProblemMode) {
+      const source = ProblemBuilder.findBoxNearPoint(x1, y1, this.state);
+      if (source && !ProblemBuilder.findBoxNearPoint(x2, y2, this.state, source)) {
+        const w = 140, h = 110, gap = 16;
+        const rect = bend === 'vh'
+          ? { x: x2 >= x1 ? x2 + gap : x2 - gap - w, y: y2 - h / 2, width: w, height: h }
+          : { x: x2 - w / 2, y: y2 >= y1 ? y2 + gap : y2 - gap - h, width: w, height: h };
+        if (!ProblemBuilder.findOverlappingBox(rect, this.state)) {
+          this.state.showCompoundBoxes = true;
+          this.state.addReferenceBox({ boxType: 'compound', label: ProblemBuilder.getNextLabel(this.state), ...rect });
+          ProblemBuilder.assignUnknownLetters(this.state);
+        }
+      }
+    }
     this.state.clearSelection();
     this.state.selected.arrows.add(newArrow.id);
     this.renderer.render();

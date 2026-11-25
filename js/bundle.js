@@ -2087,6 +2087,57 @@ class ChemAligner {
 
     const molecules = getAllMolecules(state);
 
+    // Conexiones flecha-recuadro antes de mover nada (para las flechas en "L" y lo que cuelga de ellas)
+    const links = new Map();
+    const splitSources = new Map(); // recuadros de origen de bifurcaciones y convergencias
+    const splitTargets = new Map();
+    for (const arrow of state.arrows.values()) {
+      if (arrow.type === 'fork' || arrow.type === 'converge') {
+        const ys = arrow.type === 'fork' ? [arrow.y1] : [
+          arrow.yTop !== undefined ? arrow.yTop : arrow.y2 - 75,
+          arrow.yBottom !== undefined ? arrow.yBottom : arrow.y2 + 75
+        ];
+        splitSources.set(arrow.id, ys.map(y => ProblemBuilder.findBoxNearPoint(arrow.x1, y, state)?.id));
+        const ends = arrow.type === 'fork' ? [
+          arrow.yTop !== undefined ? arrow.yTop : arrow.y1 - 75,
+          arrow.yBottom !== undefined ? arrow.yBottom : arrow.y1 + 75
+        ] : [arrow.y2];
+        splitTargets.set(arrow.id, ends.map(y => ProblemBuilder.findBoxNearPoint(arrow.x2, y, state)?.id));
+        continue;
+      }
+      const src = ProblemBuilder.findBoxNearPoint(arrow.x1, arrow.y1, state);
+      const tgt = src && ProblemBuilder.findBoxNearPoint(arrow.x2, arrow.y2, state, src);
+      if (src && tgt) links.set(arrow.id, { src: src.id, tgt: tgt.id });
+    }
+    const downstreamOf = (boxId) => {
+      const seen = new Set([boxId]);
+      for (const id of seen) { // el Set crece mientras se recorre
+        for (const l of links.values()) if (l.src === id) seen.add(l.tgt);
+      }
+      return seen;
+    };
+    // Las ramas que salen de una flecha en "L" se maquetan al final, en orden de síntesis
+    const branchBoxes = new Set();
+    for (const arrow of state.arrows.values()) {
+      const l = links.get(arrow.id);
+      if (!l || !getArrowBendCorner(arrow)) continue;
+      const down = downstreamOf(l.tgt);
+      if (!down.has(l.src)) down.forEach(id => branchBoxes.add(id));
+    }
+    const boxRank = (boxId) => {
+      if (!branchBoxes.has(boxId)) return 0;
+      let rank = 1;
+      for (const id of branchBoxes) if (id !== boxId && downstreamOf(id).has(boxId)) rank++;
+      return rank;
+    };
+    const branchRank = (arrow) => {
+      const l = links.get(arrow.id);
+      if (l) return boxRank(l.tgt);
+      const ranks = (splitSources.get(arrow.id) || []).map(boxRank);
+      const r = Math.max(0, ...ranks);
+      return r > 0 ? r + 0.5 : 0; // justo después de colocar su recuadro de origen
+    };
+
     // 1. Asignar letras correlativas de incógnita (A, B, C...) a los recuadros vacíos del esquema
     ProblemBuilder.assignUnknownLetters(state);
 
@@ -2127,7 +2178,7 @@ class ChemAligner {
       }
     }
 
-    // 2.1 Incógnitas vacías al final de la ruta: reducirlas al tamaño de su letra
+    // 2.1 Incógnitas vacías: reducirlas al tamaño de su letra
     ProblemBuilder.compactLeafUnknowns(state);
 
     // Helper para obtener el rectángulo y centro de una entidad
@@ -2198,6 +2249,17 @@ class ChemAligner {
       allEntities.push(getEntityBounds(label));
     }
 
+    // Dueño de cada molécula antes de mover nada: así un recuadro que pase por encima de otra
+    // molécula durante la maquetación no se la lleva consigo
+    const boxEntities = allEntities.filter(e => e.type === 'box');
+    for (const e of boxEntities) e.ownAtoms = [];
+    for (const mol of molecules) {
+      if (!mol.bbox) continue;
+      const { centerX, centerY } = mol.bbox;
+      const owner = boxEntities.find(e => centerX >= e.minX && centerX <= e.maxX && centerY >= e.minY && centerY <= e.maxY);
+      if (owner) owner.ownAtoms.push(...mol.atoms);
+    }
+
     // Reconciliar y limpiar flechas duplicadas o redundantes:
     // Si un recuadro es el origen de una flecha de bifurcación (fork),
     // cualquier flecha normal que también salga de él hacia la derecha es redundante
@@ -2205,8 +2267,10 @@ class ChemAligner {
     const forkSources = [];
     for (const arrow of state.arrows.values()) {
       if (arrow.type === 'fork') {
+        const forkSrcId = splitSources.get(arrow.id)?.[0];
         for (const ent of allEntities) {
-          if (Math.hypot(ent.maxX - arrow.x1, ent.centerY - arrow.y1) < 80) {
+          if ((forkSrcId && ent.type === 'box' && ent.entity.id === forkSrcId) ||
+              Math.hypot(ent.maxX - arrow.x1, ent.centerY - arrow.y1) < 80) {
             forkSources.push(ent);
           }
         }
@@ -2217,8 +2281,12 @@ class ChemAligner {
       for (const arrow of Array.from(state.arrows.values())) {
         if (arrow.type === 'normal' && (arrow.x2 >= arrow.x1 - 10)) {
           for (const src of forkSources) {
-            if (Math.hypot(src.maxX - arrow.x1, src.centerY - arrow.y1) < 80) {
+            const l = links.get(arrow.id);
+            const leavesRight = !arrow.bend && Math.abs(arrow.x2 - arrow.x1) >= Math.abs(arrow.y2 - arrow.y1);
+            if ((l && src.type === 'box' && l.src === src.entity.id && leavesRight) ||
+                (!l && Math.hypot(src.maxX - arrow.x1, src.centerY - arrow.y1) < 80)) {
               state.arrows.delete(arrow.id);
+              links.delete(arrow.id);
             }
           }
         }
@@ -2229,10 +2297,11 @@ class ChemAligner {
     const sortedArrows = Array.from(state.arrows.values()).sort((a, b) => {
       const ax = Math.min(a.x1, a.x2);
       const bx = Math.min(b.x1, b.x2);
-      return ax - bx;
+      return (branchRank(a) - branchRank(b)) || (ax - bx);
     });
 
-    const gap = 16;
+    const gapOf = (ent) => (ent && ent.type === 'box') ? ProblemBuilder.fitGap(ent.entity) : 16;
+    const boxEntity = (id) => id && allEntities.find(e => e.type === 'box' && e.entity.id === id);
 
     for (const arrow of sortedArrows) {
       const dx = arrow.x2 - arrow.x1;
@@ -2298,6 +2367,24 @@ class ChemAligner {
         }
       }
 
+      // Los recuadros pueden haberse movido o cambiado de tamaño: usar las conexiones originales
+      const link = links.get(arrow.id);
+      const isBent = Boolean(getArrowBendCorner(arrow));
+      if (link) {
+        source = allEntities.find(e => e.type === 'box' && e.entity.id === link.src) || source;
+        target = allEntities.find(e => e.type === 'box' && e.entity.id === link.tgt) || target;
+      }
+
+      if (isBent) {
+        // Flecha en "L": conserva su forma. Si no une dos recuadros, se queda donde la puso el usuario
+        if (link && source && target) {
+          this.fitBentArrow(arrow, source, target, {
+            textWidth: requiredAssemblyWidth, lines: numLines, links, downstream: downstreamOf(link.tgt), allEntities, state
+          });
+        }
+        continue;
+      }
+
       if (arrow.type === 'fork') {
         const topLines = (arrow.reagentsTop || '').split('\n').filter(Boolean);
         const bottomLines = (arrow.reagentsBottom || '').split('\n').filter(Boolean);
@@ -2317,15 +2404,17 @@ class ChemAligner {
           }
         }
 
+        source = boxEntity(splitSources.get(arrow.id)?.[0]) || source;
+
         const isLeft = arrow.direction === 'left' || arrow.x2 < arrow.x1;
         if (source) {
           if (isLeft) {
-            arrow.x1 = source.minX - gap;
+            arrow.x1 = source.minX - gapOf(source);
             arrow.y1 = source.centerY;
             arrow.stemEndX = arrow.x1 - stemLen;
             arrow.x2 = arrow.stemEndX - branchLen;
           } else {
-            arrow.x1 = source.maxX + gap;
+            arrow.x1 = source.maxX + gapOf(source);
             arrow.y1 = source.centerY;
             arrow.stemEndX = arrow.x1 + stemLen;
             arrow.x2 = arrow.stemEndX + branchLen;
@@ -2375,6 +2464,11 @@ class ChemAligner {
           }
         }
 
+        const [forkTopId, forkBottomId] = splitTargets.get(arrow.id) || [];
+        targetTop = boxEntity(forkTopId) || targetTop;
+        targetBottom = boxEntity(forkBottomId) || targetBottom;
+        if (targetBottom === targetTop) targetBottom = null;
+
         // Medir altura real de ambas entidades para que NUNCA colisionen ni se solapen
         const getEntityHeight = (ent) => {
           if (!ent) return 110;
@@ -2395,14 +2489,14 @@ class ChemAligner {
         arrow.yBottom = Math.round(arrow.y1 + branchSpacing / 2);
 
         if (targetTop) {
-          const desiredX = isLeft ? (arrow.x2 - gap - (targetTop.maxX - targetTop.minX)) : (arrow.x2 + gap);
+          const desiredX = isLeft ? (arrow.x2 - gapOf(targetTop) - (targetTop.maxX - targetTop.minX)) : (arrow.x2 + gapOf(targetTop));
           const shiftX = desiredX - targetTop.minX;
           const shiftY = arrow.yTop - targetTop.centerY;
           this.shiftEntityAndContent(targetTop, shiftX, shiftY, state);
         }
 
         if (targetBottom) {
-          const desiredX = isLeft ? (arrow.x2 - gap - (targetBottom.maxX - targetBottom.minX)) : (arrow.x2 + gap);
+          const desiredX = isLeft ? (arrow.x2 - gapOf(targetBottom) - (targetBottom.maxX - targetBottom.minX)) : (arrow.x2 + gapOf(targetBottom));
           const shiftX = desiredX - targetBottom.minX;
           const shiftY = arrow.yBottom - targetBottom.centerY;
           this.shiftEntityAndContent(targetBottom, shiftX, shiftY, state);
@@ -2445,6 +2539,11 @@ class ChemAligner {
           }
         }
 
+        const [topId, bottomId] = splitSources.get(arrow.id) || [];
+        sourceTop = boxEntity(topId) || sourceTop;
+        sourceBottom = boxEntity(bottomId) || sourceBottom;
+        if (sourceBottom === sourceTop) sourceBottom = null;
+
         const getEntityHeight = (ent) => {
           if (!ent) return 110;
           if (ent.entity && ent.entity.height) return ent.entity.height;
@@ -2459,13 +2558,13 @@ class ChemAligner {
         arrow.branchSpacing = branchSpacing;
 
         if (sourceTop && sourceBottom) {
-          arrow.x1 = Math.max(sourceTop.maxX, sourceBottom.maxX) + gap;
+          arrow.x1 = Math.max(sourceTop.maxX, sourceBottom.maxX) + Math.max(gapOf(sourceTop), gapOf(sourceBottom));
           arrow.yTop = sourceTop.centerY;
           arrow.yBottom = sourceBottom.centerY;
           arrow.yMid = Math.round((arrow.yTop + arrow.yBottom) / 2);
           arrow.y2 = arrow.yMid;
         } else if (sourceTop) {
-          arrow.x1 = sourceTop.maxX + gap;
+          arrow.x1 = sourceTop.maxX + gapOf(sourceTop);
           arrow.yTop = sourceTop.centerY;
           arrow.yBottom = Math.round(arrow.yTop + branchSpacing);
           arrow.yMid = Math.round(arrow.yTop + branchSpacing / 2);
@@ -2492,8 +2591,9 @@ class ChemAligner {
           }
         }
 
+        target = boxEntity(splitTargets.get(arrow.id)?.[0]) || target;
         if (target) {
-          const desiredX = arrow.x2 + gap;
+          const desiredX = arrow.x2 + gapOf(target);
           const shiftX = desiredX - target.minX;
           const shiftY = arrow.yMid - target.centerY;
           this.shiftEntityAndContent(target, shiftX, shiftY, state);
@@ -2507,7 +2607,7 @@ class ChemAligner {
         let midY = (arrow.y1 + arrow.y2) / 2;
 
         if (source) {
-          startX = source.maxX + gap;
+          startX = source.maxX + gapOf(source);
           midY = source.centerY;
         }
 
@@ -2517,7 +2617,7 @@ class ChemAligner {
         arrow.y2 = midY;
 
         if (target) {
-          const desiredTargetMinX = arrow.x2 + gap;
+          const desiredTargetMinX = arrow.x2 + gapOf(target);
           const shiftX = desiredTargetMinX - target.minX;
           const shiftY = midY - target.centerY;
           this.shiftEntityAndContent(target, shiftX, shiftY, state);
@@ -2527,7 +2627,7 @@ class ChemAligner {
         let midY = (arrow.y1 + arrow.y2) / 2;
 
         if (source) {
-          startX = source.minX - gap;
+          startX = source.minX - gapOf(source);
           midY = source.centerY;
         }
 
@@ -2537,7 +2637,7 @@ class ChemAligner {
         arrow.y2 = midY;
 
         if (target) {
-          const desiredTargetMaxX = arrow.x2 - gap;
+          const desiredTargetMaxX = arrow.x2 - gapOf(target);
           const shiftX = desiredTargetMaxX - target.maxX;
           const shiftY = midY - target.centerY;
           this.shiftEntityAndContent(target, shiftX, shiftY, state);
@@ -2547,7 +2647,7 @@ class ChemAligner {
         let midX = (arrow.x1 + arrow.x2) / 2;
 
         if (source) {
-          startY = source.maxY + gap;
+          startY = source.maxY + gapOf(source);
           midX = source.centerX;
         }
 
@@ -2557,7 +2657,7 @@ class ChemAligner {
         arrow.x2 = midX;
 
         if (target) {
-          const desiredTargetMinY = arrow.y2 + gap;
+          const desiredTargetMinY = arrow.y2 + gapOf(target);
           const shiftY = desiredTargetMinY - target.minY;
           const shiftX = midX - target.centerX;
           this.shiftEntityAndContent(target, shiftX, shiftY, state);
@@ -2567,7 +2667,7 @@ class ChemAligner {
         let midX = (arrow.x1 + arrow.x2) / 2;
 
         if (source) {
-          startY = source.minY - gap;
+          startY = source.minY - gapOf(source);
           midX = source.centerX;
         }
 
@@ -2577,7 +2677,7 @@ class ChemAligner {
         arrow.x2 = midX;
 
         if (target) {
-          const desiredTargetMaxY = arrow.y2 - gap;
+          const desiredTargetMaxY = arrow.y2 - gapOf(target);
           const shiftY = desiredTargetMaxY - target.maxY;
           const shiftX = midX - target.centerX;
           this.shiftEntityAndContent(target, shiftX, shiftY, state);
@@ -2587,6 +2687,47 @@ class ChemAligner {
 
     // 3. Ajuste final de seguridad de flechas sueltas
     this.adjustArrowsToMolecules(state, 18);
+  }
+
+  /**
+   * Recoloca una flecha en "L" y su recuadro destino sin perder el doblez.
+   * Si el destino es parte de un ciclo o recibe otra flecha, solo se ajustan los extremos.
+   */
+  static fitBentArrow(arrow, source, target, { textWidth, lines, links, downstream, allEntities, state }) {
+    const vertical = arrow.bend === 'vh';
+    const horizDir = arrow.x2 >= arrow.x1 ? 'right' : 'left';
+    const vertDir = arrow.y2 >= arrow.y1 ? 'down' : 'up';
+    const first = vertical ? vertDir : horizDir;
+    const second = vertical ? horizDir : vertDir;
+    const src = source.entity, tgt = target.entity;
+
+    const incoming = Array.from(links.values()).filter(l => l.tgt === tgt.id).length;
+    if (downstream.has(src.id) || incoming > 1) {
+      const start = ProblemBuilder.bentLayout(src, first, second, tgt.width, tgt.height, { gap: ProblemBuilder.fitGap(src) });
+      const end = ProblemBuilder.arrowEndAtBox(src, tgt, second, ProblemBuilder.fitGap(tgt));
+      arrow.x1 = start.x1;
+      arrow.y1 = start.y1;
+      arrow.x2 = end.x2;
+      arrow.y2 = end.y2;
+      return;
+    }
+
+    const gaps = { gap: ProblemBuilder.fitGap(src), endGap: ProblemBuilder.fitGap(tgt) };
+    const opts = { ...gaps, textWidth, lines, minDx: Math.abs(arrow.x2 - arrow.x1), minDy: Math.abs(arrow.y2 - arrow.y1) };
+    let layout = ProblemBuilder.bentLayout(src, first, second, tgt.width, tgt.height, opts);
+    const margin = 24;
+    const collides = (p) => allEntities.some(e => e.type === 'box' && !downstream.has(e.entity.id) &&
+      p.boxX < e.maxX + margin && p.boxX + tgt.width + margin > e.minX &&
+      p.boxY < e.maxY + margin && p.boxY + tgt.height + margin > e.minY);
+    for (let i = 0; i < 60 && collides(layout); i++) {
+      layout = ProblemBuilder.bentLayout(src, first, second, tgt.width, tgt.height,
+        { ...opts, minDy: Math.abs(layout.y2 - layout.y1) + 20 });
+    }
+    arrow.x1 = layout.x1;
+    arrow.y1 = layout.y1;
+    arrow.x2 = layout.x2;
+    arrow.y2 = layout.y2;
+    this.shiftEntityAndContent(target, layout.boxX - target.minX, layout.boxY - target.minY, state);
   }
 
   /**
@@ -2600,7 +2741,7 @@ class ChemAligner {
       const b = target.entity;
       b.x += shiftX;
       b.y += shiftY;
-      const boxAtoms = this.getAtomsForBox(b, state, target.minX, target.maxX, target.minY, target.maxY);
+      const boxAtoms = target.ownAtoms || this.getAtomsForBox(b, state, target.minX, target.maxX, target.minY, target.maxY);
       for (const atom of boxAtoms) {
         atom.x += shiftX;
         atom.y += shiftY;
@@ -2670,6 +2811,21 @@ class ProblemBuilder {
       if (!existingLabels.has(letter)) return letter;
     }
     return `C${existingLabels.size + 1}`;
+  }
+
+  /** Tamaño de una incógnita reducida a su letra (22 px), con sitio para la fórmula de debajo si la hay */
+  static unknownSize(letter, hasFormula = false) {
+    return { W: Math.max(32, Math.round(letter.length * 16 + 16)), H: hasFormula ? 64 : 36 };
+  }
+
+  /** ¿Es una incógnita reducida al tamaño de su letra? */
+  static isCompact(box) {
+    return Boolean(box && box.compacted && box.unknownLetter && box.height <= 64);
+  }
+
+  /** Espacio entre un recuadro y sus flechas al encajar: menor junto a una letra suelta */
+  static fitGap(box) {
+    return this.isCompact(box) ? 4 : 10;
   }
 
   /** Distancia de un punto al rectángulo de un recuadro (0 si está dentro) */
@@ -2745,7 +2901,7 @@ class ProblemBuilder {
       return Math.hypot(px - cx, py - cy);
     };
     const existingCompounds = Array.from(state.referenceBoxes.values()).filter(b => b.boxType === 'compound');
-    const unknownSize = (text) => ({ W: Math.max(44, Math.round(text.length * 23 + 18)), H: 56 });
+    const unknownSize = (text) => this.unknownSize(text);
 
     // 1. Nodos
     const nodes = [];
@@ -3011,8 +3167,9 @@ class ProblemBuilder {
   static extendFromBox(sourceBox, direction = 'right', state) {
     state.saveSnapshot();
 
-    const boxWidth = sourceBox.width || 140;
-    const boxHeight = sourceBox.height || 110;
+    // Desde una incógnita compacta, el recuadro nuevo nace con tamaño normal para poder dibujar en él
+    const boxWidth = (!this.isCompact(sourceBox) && sourceBox.width) || 140;
+    const boxHeight = (!this.isCompact(sourceBox) && sourceBox.height) || 110;
     const arrowLength = (direction === 'down' || direction === 'up') ? 76 : 110;
     const gap = 16;
 
@@ -3025,20 +3182,20 @@ class ProblemBuilder {
       arrowX2 = arrowX1 + arrowLength;
       arrowY2 = arrowY1;
       newBoxX = arrowX2 + gap;
-      newBoxY = sourceBox.y;
+      newBoxY = sourceBox.y + sourceBox.height / 2 - boxHeight / 2;
     } else if (direction === 'down') {
       arrowX1 = sourceBox.x + sourceBox.width / 2;
       arrowY1 = sourceBox.y + sourceBox.height + gap;
       arrowX2 = arrowX1;
       arrowY2 = arrowY1 + arrowLength;
-      newBoxX = sourceBox.x;
+      newBoxX = sourceBox.x + sourceBox.width / 2 - boxWidth / 2;
       newBoxY = arrowY2 + gap;
     } else if (direction === 'up') {
       arrowX1 = sourceBox.x + sourceBox.width / 2;
       arrowY1 = sourceBox.y - gap;
       arrowX2 = arrowX1;
       arrowY2 = arrowY1 - arrowLength;
-      newBoxX = sourceBox.x;
+      newBoxX = sourceBox.x + sourceBox.width / 2 - boxWidth / 2;
       newBoxY = arrowY2 - boxHeight - gap;
     } else { // left
       arrowX1 = sourceBox.x - gap;
@@ -3046,7 +3203,7 @@ class ProblemBuilder {
       arrowX2 = arrowX1 - arrowLength;
       arrowY2 = arrowY1;
       newBoxX = arrowX2 - boxWidth - gap;
-      newBoxY = sourceBox.y;
+      newBoxY = sourceBox.y + sourceBox.height / 2 - boxHeight / 2;
     }
 
     // Si el nuevo recuadro caería encima de uno existente (p. ej. clics repetidos o cerrar un
@@ -3089,6 +3246,64 @@ class ProblemBuilder {
   }
 
   /**
+   * Geometría de una flecha en "L" entre recuadros: sale de 'src' en la dirección 'first' y dobla
+   * hacia 'second'. Devuelve los extremos de la flecha y la esquina superior izquierda del destino.
+   * 'opts': ancho (textWidth) y líneas (lines) de los reactivos, y tramos mínimos (minDx, minDy).
+   */
+  static bentLayout(src, first, second, width, height, opts = {}) {
+    const { textWidth = 0, lines = 0, minDx = 0, minDy = 0, gap = 16, endGap = gap } = opts;
+    const cx = src.x + src.width / 2, cy = src.y + src.height / 2;
+    const vertical = first === 'down' || first === 'up';
+    const sx = (first === 'right' || second === 'right') ? 1 : -1;
+    const sy = (first === 'down' || second === 'down') ? 1 : -1;
+    let x1, y1, dx, dy;
+    if (vertical) {
+      x1 = cx;
+      y1 = cy + sy * (src.height / 2 + gap);
+      // Los reactivos van a la derecha del tramo vertical; el destino queda por debajo/encima del origen
+      dx = Math.max(90, sx > 0 ? textWidth + 36 : 0);
+      dy = Math.max(90, lines * 20 + 30, height / 2 + 40 - gap);
+    } else {
+      x1 = cx + sx * (src.width / 2 + gap);
+      y1 = cy;
+      dx = Math.max(105, textWidth + 38);
+      dy = Math.max(76, lines * 20 + 30, src.height / 2 + 40 - endGap);
+    }
+    const x2 = x1 + sx * Math.max(dx, minDx);
+    const y2 = y1 + sy * Math.max(dy, minDy);
+    const boxX = vertical ? (sx > 0 ? x2 + endGap : x2 - endGap - width) : x2 - width / 2;
+    const boxY = vertical ? y2 - height / 2 : (sy > 0 ? y2 + endGap : y2 - endGap - height);
+    return { x1, y1, x2, y2, bend: vertical ? 'vh' : 'hv', boxX, boxY };
+  }
+
+  /**
+   * Siguiente paso con flecha doblada en "L" (p. ej. abajo + derecha, estilo IChO).
+   */
+  static extendBentFromBox(sourceBox, first, second, state) {
+    const width = 140;
+    const height = 110;
+    const rectOf = (p) => ({ x: p.boxX, y: p.boxY, width, height });
+
+    // Si el sitio está ocupado, alejar el destino en vertical; si ya está unido a este recuadro
+    // (clic repetido), no duplicar la flecha
+    let layout = this.bentLayout(sourceBox, first, second, width, height);
+    for (let i = 0; i < 60; i++) {
+      const hit = this.findOverlappingBox(rectOf(layout), state, sourceBox);
+      if (!hit) break;
+      if (this.arrowConnects(sourceBox, hit, state)) return { arrow: null, newBox: hit, reused: true };
+      layout = this.bentLayout(sourceBox, first, second, width, height, { minDy: Math.abs(layout.y2 - layout.y1) + 20 });
+    }
+
+    state.saveSnapshot();
+    const { x1, y1, x2, y2, bend } = layout;
+    const arrow = state.addArrow({ x1, y1, x2, y2, bend, type: 'normal', reagentsTop: '', reagentsBottom: '' });
+    const label = this.getNextLabel(state);
+    const newBox = state.addReferenceBox({ boxType: 'compound', label, unknownLetter: label, ...rectOf(layout) });
+    this.assignUnknownLetters(state);
+    return { arrow, newBox };
+  }
+
+  /**
    * Bifurca el esquema desde un recuadro origen para rutas paralelas / estereoquímica (Anti / Syn).
    * Genera una flecha de bifurcación (fork arrow) y dos recuadros de compuestos paralelos (arriba y abajo).
    */
@@ -3096,8 +3311,9 @@ class ProblemBuilder {
     state.saveSnapshot();
 
     const dir = direction || sourceBox.activeAxis || 'right';
-    const boxWidth = sourceBox.width || 140;
-    const boxHeight = sourceBox.height || 110;
+    // Desde una incógnita compacta, el recuadro nuevo nace con tamaño normal para poder dibujar en él
+    const boxWidth = (!this.isCompact(sourceBox) && sourceBox.width) || 140;
+    const boxHeight = (!this.isCompact(sourceBox) && sourceBox.height) || 110;
     const branchSpacing = 150;
     const gap = 16;
     const stemLen = 70;
@@ -3481,7 +3697,7 @@ class ProblemBuilder {
   }
 
   /**
-   * Al encajar el esquema, las incógnitas vacías al final de la ruta ocupan solo lo que mide
+   * Al encajar el esquema, las incógnitas vacías ocupan solo lo que mide
    * su letra (estilo IChO: "→ H1") en vez del tamaño de un recuadro de molécula.
    * No se hace al crear los recuadros, para que haya espacio donde dibujar la molécula.
    */
@@ -3494,15 +3710,14 @@ class ProblemBuilder {
   }
 
   /**
-   * Reduce un recuadro de incógnita vacío (al final de la ruta) al tamaño de su letra,
+   * Reduce un recuadro de incógnita vacío al tamaño de su letra,
    * conservando el lado por el que llega su flecha para que la letra quede junto a la punta.
    * Los recuadros redimensionados a mano (userSized) no se tocan.
    */
   static compactEmptyBox(box, state) {
     if (!box || box.userSized) return;
     const letter = String(box.unknownLetter || box.label || 'A').trim() || 'A';
-    const W = Math.max(44, Math.round(letter.length * 23 + 18));
-    const H = 56;
+    const { W, H } = this.unknownSize(letter, Boolean(box.description && String(box.description).trim()));
     if (Math.abs(box.width - W) < 0.5 && Math.abs(box.height - H) < 0.5) return;
 
     const distToBox = (px, py) => {
@@ -3511,13 +3726,15 @@ class ProblemBuilder {
       return Math.hypot(px - cx, py - cy);
     };
 
-    // Puntos donde llegan / salen flechas, con su dirección
+    // Puntos donde llegan flechas, con su dirección
     const ends = [];
-    const starts = [];
     for (const a of state.arrows.values()) {
       const sx = Math.sign(a.x2 - a.x1);
       const sy = Math.sign(a.y2 - a.y1);
-      const horizontal = Math.abs(a.x2 - a.x1) >= Math.abs(a.y2 - a.y1);
+      // En una flecha en "L" cuenta el último tramo, que es el que llega al recuadro
+      const horizontal = getArrowBendCorner(a)
+        ? a.bend === 'vh'
+        : Math.abs(a.x2 - a.x1) >= Math.abs(a.y2 - a.y1);
       const dir = horizontal ? { dx: sx, dy: 0 } : { dx: 0, dy: sy };
       if (a.type === 'fork') {
         if (horizontal) {
@@ -3527,14 +3744,10 @@ class ProblemBuilder {
           ends.push({ x: a.xTop !== undefined ? a.xTop : a.x2, y: a.y2, dir });
           ends.push({ x: a.xBottom !== undefined ? a.xBottom : a.x2, y: a.y2, dir });
         }
-        starts.push({ x: a.x1, y: a.y1, dir });
       } else if (a.type === 'converge') {
         ends.push({ x: a.x2, y: a.y2, dir });
-        starts.push({ x: a.x1, y: a.yTop !== undefined ? a.yTop : a.y1, dir });
-        starts.push({ x: a.x1, y: a.yBottom !== undefined ? a.yBottom : a.y1, dir });
       } else {
         ends.push({ x: a.x2, y: a.y2, dir });
-        starts.push({ x: a.x1, y: a.y1, dir });
       }
     }
     const nearest = (pts) => {
@@ -3545,11 +3758,6 @@ class ProblemBuilder {
       }
       return best;
     };
-
-    // Solo se compactan incógnitas al final de la ruta (sin flecha de salida): si ya sale una
-    // flecha, encoger el recuadro la separaría de él y el esquema dejaría de reconocer la conexión.
-    // Al extender desde una incógnita compacta, la flecha nueva ya nace junto a su letra.
-    if (nearest(starts)) return;
 
     const cx = box.x + box.width / 2;
     const cy = box.y + box.height / 2;
@@ -5946,32 +6154,41 @@ class ReferenceBoxRenderer {
       }
     }
 
-    // 3. Etiqueta de esquina (A, B, C...): identifica el recuadro y se dibuja si hay molécula.
-    //    En una incógnita vacía no se repite (la letra grande ya la muestra). El rótulo escrito
-    //    por el usuario se dibuja aparte, debajo de la molécula.
-    if (label && label.trim() !== '' && hasAtoms) {
+    // 3. Etiqueta de esquina (A, B, C...): identifica el recuadro, tenga molécula o incógnita.
+    //    En las incógnitas es solo una ayuda de edición: no se exporta, porque la letra grande ya
+    //    nombra el compuesto. El rótulo escrito por el usuario se dibuja debajo de la molécula.
+    if (label && label.trim() !== '') {
+      const badge = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      badge.setAttribute('class', `corner-badge ${hasAtoms ? '' : 'corner-badge-unknown'}`);
+      // En recuadros compactos la pastilla va centrada en la esquina (y algo menor, para no tapar la letra)
+      const compact = width < 90 || height < 80;
+      const badgeW = compact ? Math.max(18, label.trim().length * 8 + 8) : Math.max(24, label.trim().length * 9 + 10);
+      const badgeH = compact ? 18 : 22;
+      const badgeX = compact ? x - badgeW / 2 : x + 8;
+      const badgeY = compact ? y - badgeH / 2 : y + 8;
       // Pastilla de fondo para la letra
       const badgeBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-      badgeBg.setAttribute('x', x + 8);
-      badgeBg.setAttribute('y', y + 8);
-      badgeBg.setAttribute('width', '24');
-      badgeBg.setAttribute('height', '22');
+      badgeBg.setAttribute('x', badgeX);
+      badgeBg.setAttribute('y', badgeY);
+      badgeBg.setAttribute('width', badgeW);
+      badgeBg.setAttribute('height', badgeH);
       badgeBg.setAttribute('rx', '4');
       badgeBg.setAttribute('fill', isDark ? '#1e293b' : '#f1f5f9');
       badgeBg.setAttribute('stroke', isDark ? '#334155' : '#cbd5e1');
       badgeBg.setAttribute('stroke-width', '1');
-      group.appendChild(badgeBg);
+      badge.appendChild(badgeBg);
 
       const labelText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-      labelText.setAttribute('x', x + 20);
-      labelText.setAttribute('y', y + 24);
+      labelText.setAttribute('x', badgeX + badgeW / 2);
+      labelText.setAttribute('y', badgeY + badgeH / 2 + (compact ? 4.3 : 5));
       labelText.setAttribute('text-anchor', 'middle');
       labelText.setAttribute('font-family', 'Arial, Helvetica, sans-serif');
-      labelText.setAttribute('font-size', '14');
+      labelText.setAttribute('font-size', compact ? '12' : '14');
       labelText.setAttribute('font-weight', 'bold');
       labelText.setAttribute('fill', isDark ? '#f8fafc' : '#0f172a');
       labelText.textContent = label;
-      group.appendChild(labelText);
+      badge.appendChild(labelText);
+      group.appendChild(badge);
     }
 
     // 4. Letra incógnita grande central de olimpiadas (A, B, C...) si el recuadro está vacío
@@ -5979,12 +6196,11 @@ class ReferenceBoxRenderer {
     if (!hasAtoms && letterToDisplay) {
       const unknownText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
       unknownText.setAttribute('x', x + width / 2);
-      unknownText.setAttribute('y', y + height / 2 + 12);
+      unknownText.setAttribute('y', y + height / 2 + 8);
       unknownText.setAttribute('text-anchor', 'middle');
-      unknownText.setAttribute('font-family', "'Times New Roman', Times, Georgia, serif");
-      unknownText.setAttribute('font-size', '38');
+      unknownText.setAttribute('font-family', 'Arial, Helvetica, sans-serif');
+      unknownText.setAttribute('font-size', '22'); // igual que las letras sueltas de los ejemplos
       unknownText.setAttribute('font-weight', 'bold');
-      unknownText.setAttribute('font-style', 'italic');
       unknownText.setAttribute('fill', isDark ? '#ffffff' : '#0f172a');
       unknownText.setAttribute('pointer-events', 'none');
       unknownText.textContent = letterToDisplay;
@@ -6088,8 +6304,8 @@ class ReferenceBoxRenderer {
     if (!box.description || !String(box.description).trim()) return null;
     const isDark = Boolean(state && state.isDarkMode);
     const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    const letterBaseline = box.y + box.height / 2 + 12;
-    const y = hasAtoms ? box.y + box.height + this.descriptionOffset(box, hasAtoms) : letterBaseline + 22;
+    const letterBaseline = box.y + box.height / 2 + 8;
+    const y = hasAtoms ? box.y + box.height + this.descriptionOffset(box, hasAtoms) : letterBaseline + 18;
     text.setAttribute('x', box.x + box.width / 2);
     text.setAttribute('y', y);
     text.setAttribute('text-anchor', 'middle');
@@ -6142,12 +6358,11 @@ class ReferenceBoxRenderer {
 
     const unknownText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     unknownText.setAttribute('x', x + width / 2);
-    unknownText.setAttribute('y', y + height / 2 + 12);
+    unknownText.setAttribute('y', y + height / 2 + 8);
     unknownText.setAttribute('text-anchor', 'middle');
-    unknownText.setAttribute('font-family', "'Times New Roman', Times, Georgia, serif");
-    unknownText.setAttribute('font-size', '38');
+    unknownText.setAttribute('font-family', 'Arial, Helvetica, sans-serif');
+    unknownText.setAttribute('font-size', '22'); // igual que las letras sueltas de los ejemplos
     unknownText.setAttribute('font-weight', 'bold');
-    unknownText.setAttribute('font-style', 'italic');
     unknownText.setAttribute('fill', isDark ? '#ffffff' : '#0f172a');
     unknownText.setAttribute('pointer-events', 'none');
     unknownText.textContent = unknownLetter || 'A';
@@ -8012,8 +8227,19 @@ class SelectTool {
     }
     // Recuadros de abreviaturas: se seleccionan si el recuadro de selección toca cualquier parte de ellos
     for (const box of this.state.referenceBoxes.values()) {
-      if (box.boxType === 'compound') continue;
       const bx2 = box.x + box.width, by2 = box.y + box.height;
+      if (box.boxType === 'compound') {
+        // Incógnitas (letras): basta con que su centro quede dentro. Recuadros con molécula: si quedan
+        // enteros dentro o, con los recuadros ocultos, si se seleccionó toda su molécula.
+        const atoms = ProblemBuilder.getAtomsInsideBox(box, this.state);
+        const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+        const inside = atoms.length === 0
+          ? cx >= minX && cx <= maxX && cy >= minY && cy <= maxY
+          : (box.x >= minX && bx2 <= maxX && box.y >= minY && by2 <= maxY) ||
+            (!this.state.showCompoundBoxes && atoms.every(a => this.state.selected.atoms.has(a.id)));
+        if (inside) this.state.selected.boxes.add(box.id);
+        continue;
+      }
       if (box.x <= maxX && bx2 >= minX && box.y <= maxY && by2 >= minY) {
         this.state.selected.boxes.add(box.id);
       }
@@ -8829,6 +9055,21 @@ class ArrowTool {
       reagentsTop: '',
       reagentsBottom: ''
     });
+    // Modo Problema: si sale de un recuadro y no llega a otro, crear el recuadro de destino
+    if (this.state.isProblemMode) {
+      const source = ProblemBuilder.findBoxNearPoint(x1, y1, this.state);
+      if (source && !ProblemBuilder.findBoxNearPoint(x2, y2, this.state, source)) {
+        const w = 140, h = 110, gap = 16;
+        const rect = bend === 'vh'
+          ? { x: x2 >= x1 ? x2 + gap : x2 - gap - w, y: y2 - h / 2, width: w, height: h }
+          : { x: x2 - w / 2, y: y2 >= y1 ? y2 + gap : y2 - gap - h, width: w, height: h };
+        if (!ProblemBuilder.findOverlappingBox(rect, this.state)) {
+          this.state.showCompoundBoxes = true;
+          this.state.addReferenceBox({ boxType: 'compound', label: ProblemBuilder.getNextLabel(this.state), ...rect });
+          ProblemBuilder.assignUnknownLetters(this.state);
+        }
+      }
+    }
     this.state.clearSelection();
     this.state.selected.arrows.add(newArrow.id);
     this.renderer.render();
@@ -10133,6 +10374,8 @@ class ChemExporter {
   static measureRenderedBounds(svgRootElement) {
     try {
       const root = svgRootElement.querySelector('#canvas-root');
+      // No se exportan: tampoco deben agrandar el margen (el lienzo se redibuja al terminar)
+      root?.querySelectorAll('.corner-badge-unknown').forEach(el => el.remove());
       if (!root || typeof root.getBBox !== 'function') return null;
       const b = root.getBBox(); // en coordenadas del dibujo (sin el pan/zoom del propio grupo)
       if (!b || !(b.width > 0) || !(b.height > 0)) return null;
@@ -10158,7 +10401,8 @@ class ChemExporter {
     const transient = clone.querySelectorAll([
       '.bond-drawing-preview', '.arrow-drawing-preview', '.marquee-selection-preview',
       '#bond-drawing-preview', '#arrow-drawing-preview', '#marquee-selection-preview',
-      '.chair-guide-dot', '.rotate-handle', '.box-resize-handle', '.box-port-handle'
+      '.chair-guide-dot', '.rotate-handle', '.box-resize-handle', '.box-port-handle',
+      '.corner-badge-unknown'
     ].join(', '));
     transient.forEach(el => el.remove());
 
@@ -10492,6 +10736,7 @@ class ChemApp {
    * o el que contiene todos los átomos seleccionados (útil con los recuadros ocultos).
    */
   getTaggableCompoundBox() {
+    if (this.state.selected.boxes.size > 1) return null; // selección múltiple: no hay un rótulo único que editar
     for (const id of this.state.selected.boxes) {
       const b = this.state.referenceBoxes.get(id);
       if (b && b.boxType === 'compound') return b;
@@ -10878,6 +11123,9 @@ class ChemApp {
 
       const activeTool = this.tools[this.activeToolKey];
       if (activeTool && activeTool.onMouseDown) {
+        // Arrastre en curso: el rótulo flotante no debe interceptar el ratón (ver app.css)
+        this.canvasGesture = true;
+        this.svgElement.parentElement.classList.add('canvas-gesture');
         activeTool.onMouseDown(e, canvasPos, targetInfo);
       }
     });
@@ -10908,6 +11156,12 @@ class ChemApp {
       const canvasPos = this.getCanvasCoordinates(e);
       const targetInfo = this.getTargetInfo(e);
 
+      // El botón se soltó donde no llegó el mouseup (p. ej. fuera de la ventana): terminar el arrastre
+      if (this.canvasGesture && e.buttons === 0) {
+        this.endCanvasGesture(e);
+        return;
+      }
+
       // Posición del cursor sobre el lienzo (Ctrl+V pega ahí); null si está fuera del lienzo
       const overCanvas = e.target && typeof e.target.closest === 'function' && e.target.closest('#chem-canvas');
       this.lastCanvasPos = overCanvas ? canvasPos : null;
@@ -10931,19 +11185,14 @@ class ChemApp {
 
       // Si el mouseup se originó en la interfaz de usuario (barra lateral, herramientas, encabezado, modales),
       // no ejecutar herramientas de lienzo ni recrear inspectores para no invalidar los eventos click.
-      const isUi = Boolean(e.target.closest('.sidebar-right, .toolbar-left, .header, .status-bar, .modal-overlay, .box-tag-editor'));
+      // Excepción: si el arrastre empezó en el lienzo hay que terminarlo aunque se suelte sobre la interfaz;
+      // si no, lo seleccionado se queda pegado al cursor.
+      const isUi = !this.canvasGesture && Boolean(e.target.closest('.sidebar-right, .toolbar-left, .header, .status-bar, .modal-overlay, .box-tag-editor'));
       if (isUi) {
         return;
       }
 
-      const canvasPos = this.getCanvasCoordinates(e);
-      const targetInfo = this.getTargetInfo(e);
-      const activeTool = this.tools[this.activeToolKey];
-      if (activeTool && activeTool.onMouseUp) {
-        activeTool.onMouseUp(e, canvasPos, targetInfo);
-      }
-      this.updateInspectors();
-      this.updateValenceStatus();
+      this.endCanvasGesture(e);
     });
 
     this.svgElement.addEventListener('wheel', (e) => {
@@ -10961,6 +11210,18 @@ class ChemApp {
 
       this.renderer.render();
     }, { passive: false });
+  }
+
+  /** Termina la acción en curso de la herramienta activa (soltar el ratón) */
+  endCanvasGesture(e) {
+    this.canvasGesture = false;
+    this.svgElement.parentElement.classList.remove('canvas-gesture');
+    const activeTool = this.tools[this.activeToolKey];
+    if (activeTool && activeTool.onMouseUp) {
+      activeTool.onMouseUp(e, this.getCanvasCoordinates(e), this.getTargetInfo(e));
+    }
+    this.updateInspectors();
+    this.updateValenceStatus();
   }
 
   initUiEvents() {
@@ -12212,6 +12473,21 @@ class ChemApp {
         this.renderer.render();
         this.updateInspectors();
       }
+    });
+
+    // Siguiente paso con flecha doblada en L (abajo + derecha, etc.)
+    document.querySelectorAll('[data-bent-step]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const box = this.state.referenceBoxes.get(Array.from(this.state.selected.boxes)[0]);
+        if (!box) return;
+        const [first, second] = btn.dataset.bentStep.split(' ');
+        box.activeAxis = first;
+        const step = ProblemBuilder.extendBentFromBox(box, first, second, this.state);
+        this.state.clearSelection();
+        this.state.selected.boxes.add(step.newBox.id);
+        this.renderer.render();
+        this.updateInspectors();
+      });
     });
 
     document.getElementById('btn-finish-problem-mode')?.addEventListener('click', () => {

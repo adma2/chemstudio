@@ -45,6 +45,8 @@ export class ChemExporter {
   static measureRenderedBounds(svgRootElement) {
     try {
       const root = svgRootElement.querySelector('#canvas-root');
+      // No se exportan: tampoco deben agrandar el margen (el lienzo se redibuja al terminar)
+      root?.querySelectorAll('.corner-badge-unknown').forEach(el => el.remove());
       if (!root || typeof root.getBBox !== 'function') return null;
       const b = root.getBBox(); // en coordenadas del dibujo (sin el pan/zoom del propio grupo)
       if (!b || !(b.width > 0) || !(b.height > 0)) return null;
@@ -70,7 +72,8 @@ export class ChemExporter {
     const transient = clone.querySelectorAll([
       '.bond-drawing-preview', '.arrow-drawing-preview', '.marquee-selection-preview',
       '#bond-drawing-preview', '#arrow-drawing-preview', '#marquee-selection-preview',
-      '.chair-guide-dot', '.rotate-handle', '.box-resize-handle', '.box-port-handle'
+      '.chair-guide-dot', '.rotate-handle', '.box-resize-handle', '.box-port-handle',
+      '.corner-badge-unknown'
     ].join(', '));
     transient.forEach(el => el.remove());
 

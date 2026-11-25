@@ -1,4 +1,4 @@
-import { getMoleculeBoundingBox, getAllMolecules, getConnectedMoleculeAtoms } from './elements.js';
+import { getMoleculeBoundingBox, getAllMolecules, getConnectedMoleculeAtoms, getArrowBendCorner } from './elements.js';
 import { ProblemBuilder } from './problem-builder.js';
 
 export class ChemAligner {
@@ -319,6 +319,57 @@ export class ChemAligner {
 
     const molecules = getAllMolecules(state);
 
+    // Conexiones flecha-recuadro antes de mover nada (para las flechas en "L" y lo que cuelga de ellas)
+    const links = new Map();
+    const splitSources = new Map(); // recuadros de origen de bifurcaciones y convergencias
+    const splitTargets = new Map();
+    for (const arrow of state.arrows.values()) {
+      if (arrow.type === 'fork' || arrow.type === 'converge') {
+        const ys = arrow.type === 'fork' ? [arrow.y1] : [
+          arrow.yTop !== undefined ? arrow.yTop : arrow.y2 - 75,
+          arrow.yBottom !== undefined ? arrow.yBottom : arrow.y2 + 75
+        ];
+        splitSources.set(arrow.id, ys.map(y => ProblemBuilder.findBoxNearPoint(arrow.x1, y, state)?.id));
+        const ends = arrow.type === 'fork' ? [
+          arrow.yTop !== undefined ? arrow.yTop : arrow.y1 - 75,
+          arrow.yBottom !== undefined ? arrow.yBottom : arrow.y1 + 75
+        ] : [arrow.y2];
+        splitTargets.set(arrow.id, ends.map(y => ProblemBuilder.findBoxNearPoint(arrow.x2, y, state)?.id));
+        continue;
+      }
+      const src = ProblemBuilder.findBoxNearPoint(arrow.x1, arrow.y1, state);
+      const tgt = src && ProblemBuilder.findBoxNearPoint(arrow.x2, arrow.y2, state, src);
+      if (src && tgt) links.set(arrow.id, { src: src.id, tgt: tgt.id });
+    }
+    const downstreamOf = (boxId) => {
+      const seen = new Set([boxId]);
+      for (const id of seen) { // el Set crece mientras se recorre
+        for (const l of links.values()) if (l.src === id) seen.add(l.tgt);
+      }
+      return seen;
+    };
+    // Las ramas que salen de una flecha en "L" se maquetan al final, en orden de síntesis
+    const branchBoxes = new Set();
+    for (const arrow of state.arrows.values()) {
+      const l = links.get(arrow.id);
+      if (!l || !getArrowBendCorner(arrow)) continue;
+      const down = downstreamOf(l.tgt);
+      if (!down.has(l.src)) down.forEach(id => branchBoxes.add(id));
+    }
+    const boxRank = (boxId) => {
+      if (!branchBoxes.has(boxId)) return 0;
+      let rank = 1;
+      for (const id of branchBoxes) if (id !== boxId && downstreamOf(id).has(boxId)) rank++;
+      return rank;
+    };
+    const branchRank = (arrow) => {
+      const l = links.get(arrow.id);
+      if (l) return boxRank(l.tgt);
+      const ranks = (splitSources.get(arrow.id) || []).map(boxRank);
+      const r = Math.max(0, ...ranks);
+      return r > 0 ? r + 0.5 : 0; // justo después de colocar su recuadro de origen
+    };
+
     // 1. Asignar letras correlativas de incógnita (A, B, C...) a los recuadros vacíos del esquema
     ProblemBuilder.assignUnknownLetters(state);
 
@@ -359,7 +410,7 @@ export class ChemAligner {
       }
     }
 
-    // 2.1 Incógnitas vacías al final de la ruta: reducirlas al tamaño de su letra
+    // 2.1 Incógnitas vacías: reducirlas al tamaño de su letra
     ProblemBuilder.compactLeafUnknowns(state);
 
     // Helper para obtener el rectángulo y centro de una entidad
@@ -430,6 +481,17 @@ export class ChemAligner {
       allEntities.push(getEntityBounds(label));
     }
 
+    // Dueño de cada molécula antes de mover nada: así un recuadro que pase por encima de otra
+    // molécula durante la maquetación no se la lleva consigo
+    const boxEntities = allEntities.filter(e => e.type === 'box');
+    for (const e of boxEntities) e.ownAtoms = [];
+    for (const mol of molecules) {
+      if (!mol.bbox) continue;
+      const { centerX, centerY } = mol.bbox;
+      const owner = boxEntities.find(e => centerX >= e.minX && centerX <= e.maxX && centerY >= e.minY && centerY <= e.maxY);
+      if (owner) owner.ownAtoms.push(...mol.atoms);
+    }
+
     // Reconciliar y limpiar flechas duplicadas o redundantes:
     // Si un recuadro es el origen de una flecha de bifurcación (fork),
     // cualquier flecha normal que también salga de él hacia la derecha es redundante
@@ -437,8 +499,10 @@ export class ChemAligner {
     const forkSources = [];
     for (const arrow of state.arrows.values()) {
       if (arrow.type === 'fork') {
+        const forkSrcId = splitSources.get(arrow.id)?.[0];
         for (const ent of allEntities) {
-          if (Math.hypot(ent.maxX - arrow.x1, ent.centerY - arrow.y1) < 80) {
+          if ((forkSrcId && ent.type === 'box' && ent.entity.id === forkSrcId) ||
+              Math.hypot(ent.maxX - arrow.x1, ent.centerY - arrow.y1) < 80) {
             forkSources.push(ent);
           }
         }
@@ -449,8 +513,12 @@ export class ChemAligner {
       for (const arrow of Array.from(state.arrows.values())) {
         if (arrow.type === 'normal' && (arrow.x2 >= arrow.x1 - 10)) {
           for (const src of forkSources) {
-            if (Math.hypot(src.maxX - arrow.x1, src.centerY - arrow.y1) < 80) {
+            const l = links.get(arrow.id);
+            const leavesRight = !arrow.bend && Math.abs(arrow.x2 - arrow.x1) >= Math.abs(arrow.y2 - arrow.y1);
+            if ((l && src.type === 'box' && l.src === src.entity.id && leavesRight) ||
+                (!l && Math.hypot(src.maxX - arrow.x1, src.centerY - arrow.y1) < 80)) {
               state.arrows.delete(arrow.id);
+              links.delete(arrow.id);
             }
           }
         }
@@ -461,10 +529,11 @@ export class ChemAligner {
     const sortedArrows = Array.from(state.arrows.values()).sort((a, b) => {
       const ax = Math.min(a.x1, a.x2);
       const bx = Math.min(b.x1, b.x2);
-      return ax - bx;
+      return (branchRank(a) - branchRank(b)) || (ax - bx);
     });
 
-    const gap = 16;
+    const gapOf = (ent) => (ent && ent.type === 'box') ? ProblemBuilder.fitGap(ent.entity) : 16;
+    const boxEntity = (id) => id && allEntities.find(e => e.type === 'box' && e.entity.id === id);
 
     for (const arrow of sortedArrows) {
       const dx = arrow.x2 - arrow.x1;
@@ -530,6 +599,24 @@ export class ChemAligner {
         }
       }
 
+      // Los recuadros pueden haberse movido o cambiado de tamaño: usar las conexiones originales
+      const link = links.get(arrow.id);
+      const isBent = Boolean(getArrowBendCorner(arrow));
+      if (link) {
+        source = allEntities.find(e => e.type === 'box' && e.entity.id === link.src) || source;
+        target = allEntities.find(e => e.type === 'box' && e.entity.id === link.tgt) || target;
+      }
+
+      if (isBent) {
+        // Flecha en "L": conserva su forma. Si no une dos recuadros, se queda donde la puso el usuario
+        if (link && source && target) {
+          this.fitBentArrow(arrow, source, target, {
+            textWidth: requiredAssemblyWidth, lines: numLines, links, downstream: downstreamOf(link.tgt), allEntities, state
+          });
+        }
+        continue;
+      }
+
       if (arrow.type === 'fork') {
         const topLines = (arrow.reagentsTop || '').split('\n').filter(Boolean);
         const bottomLines = (arrow.reagentsBottom || '').split('\n').filter(Boolean);
@@ -549,15 +636,17 @@ export class ChemAligner {
           }
         }
 
+        source = boxEntity(splitSources.get(arrow.id)?.[0]) || source;
+
         const isLeft = arrow.direction === 'left' || arrow.x2 < arrow.x1;
         if (source) {
           if (isLeft) {
-            arrow.x1 = source.minX - gap;
+            arrow.x1 = source.minX - gapOf(source);
             arrow.y1 = source.centerY;
             arrow.stemEndX = arrow.x1 - stemLen;
             arrow.x2 = arrow.stemEndX - branchLen;
           } else {
-            arrow.x1 = source.maxX + gap;
+            arrow.x1 = source.maxX + gapOf(source);
             arrow.y1 = source.centerY;
             arrow.stemEndX = arrow.x1 + stemLen;
             arrow.x2 = arrow.stemEndX + branchLen;
@@ -607,6 +696,11 @@ export class ChemAligner {
           }
         }
 
+        const [forkTopId, forkBottomId] = splitTargets.get(arrow.id) || [];
+        targetTop = boxEntity(forkTopId) || targetTop;
+        targetBottom = boxEntity(forkBottomId) || targetBottom;
+        if (targetBottom === targetTop) targetBottom = null;
+
         // Medir altura real de ambas entidades para que NUNCA colisionen ni se solapen
         const getEntityHeight = (ent) => {
           if (!ent) return 110;
@@ -627,14 +721,14 @@ export class ChemAligner {
         arrow.yBottom = Math.round(arrow.y1 + branchSpacing / 2);
 
         if (targetTop) {
-          const desiredX = isLeft ? (arrow.x2 - gap - (targetTop.maxX - targetTop.minX)) : (arrow.x2 + gap);
+          const desiredX = isLeft ? (arrow.x2 - gapOf(targetTop) - (targetTop.maxX - targetTop.minX)) : (arrow.x2 + gapOf(targetTop));
           const shiftX = desiredX - targetTop.minX;
           const shiftY = arrow.yTop - targetTop.centerY;
           this.shiftEntityAndContent(targetTop, shiftX, shiftY, state);
         }
 
         if (targetBottom) {
-          const desiredX = isLeft ? (arrow.x2 - gap - (targetBottom.maxX - targetBottom.minX)) : (arrow.x2 + gap);
+          const desiredX = isLeft ? (arrow.x2 - gapOf(targetBottom) - (targetBottom.maxX - targetBottom.minX)) : (arrow.x2 + gapOf(targetBottom));
           const shiftX = desiredX - targetBottom.minX;
           const shiftY = arrow.yBottom - targetBottom.centerY;
           this.shiftEntityAndContent(targetBottom, shiftX, shiftY, state);
@@ -677,6 +771,11 @@ export class ChemAligner {
           }
         }
 
+        const [topId, bottomId] = splitSources.get(arrow.id) || [];
+        sourceTop = boxEntity(topId) || sourceTop;
+        sourceBottom = boxEntity(bottomId) || sourceBottom;
+        if (sourceBottom === sourceTop) sourceBottom = null;
+
         const getEntityHeight = (ent) => {
           if (!ent) return 110;
           if (ent.entity && ent.entity.height) return ent.entity.height;
@@ -691,13 +790,13 @@ export class ChemAligner {
         arrow.branchSpacing = branchSpacing;
 
         if (sourceTop && sourceBottom) {
-          arrow.x1 = Math.max(sourceTop.maxX, sourceBottom.maxX) + gap;
+          arrow.x1 = Math.max(sourceTop.maxX, sourceBottom.maxX) + Math.max(gapOf(sourceTop), gapOf(sourceBottom));
           arrow.yTop = sourceTop.centerY;
           arrow.yBottom = sourceBottom.centerY;
           arrow.yMid = Math.round((arrow.yTop + arrow.yBottom) / 2);
           arrow.y2 = arrow.yMid;
         } else if (sourceTop) {
-          arrow.x1 = sourceTop.maxX + gap;
+          arrow.x1 = sourceTop.maxX + gapOf(sourceTop);
           arrow.yTop = sourceTop.centerY;
           arrow.yBottom = Math.round(arrow.yTop + branchSpacing);
           arrow.yMid = Math.round(arrow.yTop + branchSpacing / 2);
@@ -724,8 +823,9 @@ export class ChemAligner {
           }
         }
 
+        target = boxEntity(splitTargets.get(arrow.id)?.[0]) || target;
         if (target) {
-          const desiredX = arrow.x2 + gap;
+          const desiredX = arrow.x2 + gapOf(target);
           const shiftX = desiredX - target.minX;
           const shiftY = arrow.yMid - target.centerY;
           this.shiftEntityAndContent(target, shiftX, shiftY, state);
@@ -739,7 +839,7 @@ export class ChemAligner {
         let midY = (arrow.y1 + arrow.y2) / 2;
 
         if (source) {
-          startX = source.maxX + gap;
+          startX = source.maxX + gapOf(source);
           midY = source.centerY;
         }
 
@@ -749,7 +849,7 @@ export class ChemAligner {
         arrow.y2 = midY;
 
         if (target) {
-          const desiredTargetMinX = arrow.x2 + gap;
+          const desiredTargetMinX = arrow.x2 + gapOf(target);
           const shiftX = desiredTargetMinX - target.minX;
           const shiftY = midY - target.centerY;
           this.shiftEntityAndContent(target, shiftX, shiftY, state);
@@ -759,7 +859,7 @@ export class ChemAligner {
         let midY = (arrow.y1 + arrow.y2) / 2;
 
         if (source) {
-          startX = source.minX - gap;
+          startX = source.minX - gapOf(source);
           midY = source.centerY;
         }
 
@@ -769,7 +869,7 @@ export class ChemAligner {
         arrow.y2 = midY;
 
         if (target) {
-          const desiredTargetMaxX = arrow.x2 - gap;
+          const desiredTargetMaxX = arrow.x2 - gapOf(target);
           const shiftX = desiredTargetMaxX - target.maxX;
           const shiftY = midY - target.centerY;
           this.shiftEntityAndContent(target, shiftX, shiftY, state);
@@ -779,7 +879,7 @@ export class ChemAligner {
         let midX = (arrow.x1 + arrow.x2) / 2;
 
         if (source) {
-          startY = source.maxY + gap;
+          startY = source.maxY + gapOf(source);
           midX = source.centerX;
         }
 
@@ -789,7 +889,7 @@ export class ChemAligner {
         arrow.x2 = midX;
 
         if (target) {
-          const desiredTargetMinY = arrow.y2 + gap;
+          const desiredTargetMinY = arrow.y2 + gapOf(target);
           const shiftY = desiredTargetMinY - target.minY;
           const shiftX = midX - target.centerX;
           this.shiftEntityAndContent(target, shiftX, shiftY, state);
@@ -799,7 +899,7 @@ export class ChemAligner {
         let midX = (arrow.x1 + arrow.x2) / 2;
 
         if (source) {
-          startY = source.minY - gap;
+          startY = source.minY - gapOf(source);
           midX = source.centerX;
         }
 
@@ -809,7 +909,7 @@ export class ChemAligner {
         arrow.x2 = midX;
 
         if (target) {
-          const desiredTargetMaxY = arrow.y2 - gap;
+          const desiredTargetMaxY = arrow.y2 - gapOf(target);
           const shiftY = desiredTargetMaxY - target.maxY;
           const shiftX = midX - target.centerX;
           this.shiftEntityAndContent(target, shiftX, shiftY, state);
@@ -819,6 +919,47 @@ export class ChemAligner {
 
     // 3. Ajuste final de seguridad de flechas sueltas
     this.adjustArrowsToMolecules(state, 18);
+  }
+
+  /**
+   * Recoloca una flecha en "L" y su recuadro destino sin perder el doblez.
+   * Si el destino es parte de un ciclo o recibe otra flecha, solo se ajustan los extremos.
+   */
+  static fitBentArrow(arrow, source, target, { textWidth, lines, links, downstream, allEntities, state }) {
+    const vertical = arrow.bend === 'vh';
+    const horizDir = arrow.x2 >= arrow.x1 ? 'right' : 'left';
+    const vertDir = arrow.y2 >= arrow.y1 ? 'down' : 'up';
+    const first = vertical ? vertDir : horizDir;
+    const second = vertical ? horizDir : vertDir;
+    const src = source.entity, tgt = target.entity;
+
+    const incoming = Array.from(links.values()).filter(l => l.tgt === tgt.id).length;
+    if (downstream.has(src.id) || incoming > 1) {
+      const start = ProblemBuilder.bentLayout(src, first, second, tgt.width, tgt.height, { gap: ProblemBuilder.fitGap(src) });
+      const end = ProblemBuilder.arrowEndAtBox(src, tgt, second, ProblemBuilder.fitGap(tgt));
+      arrow.x1 = start.x1;
+      arrow.y1 = start.y1;
+      arrow.x2 = end.x2;
+      arrow.y2 = end.y2;
+      return;
+    }
+
+    const gaps = { gap: ProblemBuilder.fitGap(src), endGap: ProblemBuilder.fitGap(tgt) };
+    const opts = { ...gaps, textWidth, lines, minDx: Math.abs(arrow.x2 - arrow.x1), minDy: Math.abs(arrow.y2 - arrow.y1) };
+    let layout = ProblemBuilder.bentLayout(src, first, second, tgt.width, tgt.height, opts);
+    const margin = 24;
+    const collides = (p) => allEntities.some(e => e.type === 'box' && !downstream.has(e.entity.id) &&
+      p.boxX < e.maxX + margin && p.boxX + tgt.width + margin > e.minX &&
+      p.boxY < e.maxY + margin && p.boxY + tgt.height + margin > e.minY);
+    for (let i = 0; i < 60 && collides(layout); i++) {
+      layout = ProblemBuilder.bentLayout(src, first, second, tgt.width, tgt.height,
+        { ...opts, minDy: Math.abs(layout.y2 - layout.y1) + 20 });
+    }
+    arrow.x1 = layout.x1;
+    arrow.y1 = layout.y1;
+    arrow.x2 = layout.x2;
+    arrow.y2 = layout.y2;
+    this.shiftEntityAndContent(target, layout.boxX - target.minX, layout.boxY - target.minY, state);
   }
 
   /**
@@ -832,7 +973,7 @@ export class ChemAligner {
       const b = target.entity;
       b.x += shiftX;
       b.y += shiftY;
-      const boxAtoms = this.getAtomsForBox(b, state, target.minX, target.maxX, target.minY, target.maxY);
+      const boxAtoms = target.ownAtoms || this.getAtomsForBox(b, state, target.minX, target.maxX, target.minY, target.maxY);
       for (const atom of boxAtoms) {
         atom.x += shiftX;
         atom.y += shiftY;

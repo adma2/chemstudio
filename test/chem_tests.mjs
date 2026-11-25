@@ -901,9 +901,22 @@ console.log('✓ Ramas de bifurcación apuntan con exactitud matemática a los c
   ProblemBuilder.compactLeafUnknowns(sc); // lo que hace "Encajar Esquema"
   console.assert(leaf.width < 70 && leaf.x === 664, `Incógnita final compacta junto a la flecha (x=${leaf.x}, w=${leaf.width})`);
   console.assert(Math.abs((leaf.y + leaf.height / 2) - 155) < 1, 'La letra compacta sigue centrada en el eje de la flecha');
-  console.assert(mid.width === 140, 'Una incógnita con flecha de salida conserva su tamaño (el esquema sigue conectado)');
+  console.assert(mid.width < 70 && mid.x === 382, 'Una incógnita intermedia también se compacta junto a la flecha que le llega');
+  // Al encajar, las flechas siguen pegadas a las letras: sin huecos ni recuadros desconectados
+  for (const b of [src, mid, leaf]) { b.width = 140; b.height = 110; b.y = 100; b.compacted = false; }
+  ChemAligner.fitSchemeLayout(sc);
+  const a1 = sc.arrows.get('a1'), a2 = sc.arrows.get('a2');
+  console.assert(mid.width < 70 && mid.x - a1.x2 <= 10 && a2.x1 - (mid.x + mid.width) <= 10, 'Incógnita intermedia pegada a sus dos flechas');
+  console.assert(leaf.x - a2.x2 <= 10 && Math.abs(a2.y1 - (mid.y + mid.height / 2)) < 1, 'Incógnita final conectada y alineada');
+
+  // Flecha en "L" (abajo + derecha): conserva el doblez y las conexiones al encajar
+  const bent = ProblemBuilder.extendBentFromBox(mid, 'down', 'right', sc);
+  ChemAligner.fitSchemeLayout(sc);
+  console.assert(bent.arrow.bend === 'vh' && bent.arrow.y2 > bent.arrow.y1 + 50 && bent.arrow.x2 > bent.arrow.x1 + 50, 'La flecha en L no se endereza');
+  console.assert(Math.abs(bent.newBox.x - bent.arrow.x2) <= 10 && Math.abs(bent.newBox.y + bent.newBox.height / 2 - bent.arrow.y2) < 1, 'El destino de la L queda en la punta');
+
   console.assert(src.width === 140, 'Un recuadro con molécula no se compacta');
-  console.log('✓ Incógnita final compacta (sin espacio en blanco tras la flecha), intermedias intactas');
+  console.log('✓ Incógnita final compacta e intermedias compactas (sin espacio en blanco junto a las flechas)');
 }
 
 console.log('\n--- TEST 21: Auto & Manual Olympiad Unknown Letters (A, B, C... / Custom X) ---');
@@ -1318,7 +1331,7 @@ ChemAligner.fitSchemeLayout(state29);
 
 const vertLen = Math.abs(downArrow.y2 - downArrow.y1);
 console.assert(vertLen <= 95 && vertLen >= 72, `Longitud de flecha vertical (${vertLen}px) es compacta (<=95px) a pesar del texto largo`);
-console.assert(b29C.y === downArrow.y2 + 16, `Box C posicionado limpiamente debajo de la flecha vertical (gap=16px)`);
+console.assert(b29C.y > downArrow.y2 && b29C.y - downArrow.y2 <= 10, `Box C posicionado limpiamente debajo de la flecha vertical`);
 console.assert(Math.abs(downArrow.x1 - (b29B.x + b29B.width / 2)) < 1, 'Flecha vertical perfectamente centrada con Box B');
 console.assert(Math.abs(b29C.x + b29C.width / 2 - downArrow.x1) < 1, 'Box C centrado con la flecha vertical');
 console.log(`✓ Flecha vertical compacta (${vertLen}px) no se deforma ni se estira por reactivos largos`);
@@ -1913,4 +1926,16 @@ console.log('\n--- TEST: Arrastrar una molécula seleccionada con el recuadro --
   tool.onMouseUp({}, { x: 150, y: 100 }, null);
   console.assert(st.undoStack.length === before, 'Clic sin mover no guarda paso de Deshacer');
   console.log('✓ La selección se arrastra desde un enlace, el recuadro o su interior');
+}
+
+// El recuadro de selección también selecciona las letras de incógnita, para poder borrarlas
+{
+  const st = new ChemState();
+  const l1 = st.addReferenceBox({ boxType: 'compound', label: 'A', unknownLetter: 'A', x: 100, y: 100, width: 32, height: 36 });
+  const l2 = st.addReferenceBox({ boxType: 'compound', label: 'B', unknownLetter: 'B', x: 300, y: 100, width: 32, height: 36 });
+  const far = st.addReferenceBox({ boxType: 'compound', label: 'C', unknownLetter: 'C', x: 600, y: 100, width: 32, height: 36 });
+  const tool = new SelectTool(st, { render() {} });
+  tool.finishMarqueeSelection({ x: 50, y: 50 }, { x: 400, y: 200 });
+  console.assert(st.selected.boxes.has(l1.id) && st.selected.boxes.has(l2.id) && !st.selected.boxes.has(far.id), 'La selección con recuadro incluye solo las letras que rodea');
+  console.log('✓ Las letras de incógnita se seleccionan con el recuadro');
 }

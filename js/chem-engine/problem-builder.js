@@ -27,6 +27,21 @@ export class ProblemBuilder {
     return `C${existingLabels.size + 1}`;
   }
 
+  /** Tamaño de una incógnita reducida a su letra (22 px), con sitio para la fórmula de debajo si la hay */
+  static unknownSize(letter, hasFormula = false) {
+    return { W: Math.max(32, Math.round(letter.length * 16 + 16)), H: hasFormula ? 64 : 36 };
+  }
+
+  /** ¿Es una incógnita reducida al tamaño de su letra? */
+  static isCompact(box) {
+    return Boolean(box && box.compacted && box.unknownLetter && box.height <= 64);
+  }
+
+  /** Espacio entre un recuadro y sus flechas al encajar: menor junto a una letra suelta */
+  static fitGap(box) {
+    return this.isCompact(box) ? 4 : 10;
+  }
+
   /** Distancia de un punto al rectángulo de un recuadro (0 si está dentro) */
   static distPointToBox(px, py, b) {
     const cx = Math.max(b.x, Math.min(px, b.x + b.width));
@@ -100,7 +115,7 @@ export class ProblemBuilder {
       return Math.hypot(px - cx, py - cy);
     };
     const existingCompounds = Array.from(state.referenceBoxes.values()).filter(b => b.boxType === 'compound');
-    const unknownSize = (text) => ({ W: Math.max(44, Math.round(text.length * 23 + 18)), H: 56 });
+    const unknownSize = (text) => this.unknownSize(text);
 
     // 1. Nodos
     const nodes = [];
@@ -366,8 +381,9 @@ export class ProblemBuilder {
   static extendFromBox(sourceBox, direction = 'right', state) {
     state.saveSnapshot();
 
-    const boxWidth = sourceBox.width || 140;
-    const boxHeight = sourceBox.height || 110;
+    // Desde una incógnita compacta, el recuadro nuevo nace con tamaño normal para poder dibujar en él
+    const boxWidth = (!this.isCompact(sourceBox) && sourceBox.width) || 140;
+    const boxHeight = (!this.isCompact(sourceBox) && sourceBox.height) || 110;
     const arrowLength = (direction === 'down' || direction === 'up') ? 76 : 110;
     const gap = 16;
 
@@ -380,20 +396,20 @@ export class ProblemBuilder {
       arrowX2 = arrowX1 + arrowLength;
       arrowY2 = arrowY1;
       newBoxX = arrowX2 + gap;
-      newBoxY = sourceBox.y;
+      newBoxY = sourceBox.y + sourceBox.height / 2 - boxHeight / 2;
     } else if (direction === 'down') {
       arrowX1 = sourceBox.x + sourceBox.width / 2;
       arrowY1 = sourceBox.y + sourceBox.height + gap;
       arrowX2 = arrowX1;
       arrowY2 = arrowY1 + arrowLength;
-      newBoxX = sourceBox.x;
+      newBoxX = sourceBox.x + sourceBox.width / 2 - boxWidth / 2;
       newBoxY = arrowY2 + gap;
     } else if (direction === 'up') {
       arrowX1 = sourceBox.x + sourceBox.width / 2;
       arrowY1 = sourceBox.y - gap;
       arrowX2 = arrowX1;
       arrowY2 = arrowY1 - arrowLength;
-      newBoxX = sourceBox.x;
+      newBoxX = sourceBox.x + sourceBox.width / 2 - boxWidth / 2;
       newBoxY = arrowY2 - boxHeight - gap;
     } else { // left
       arrowX1 = sourceBox.x - gap;
@@ -401,7 +417,7 @@ export class ProblemBuilder {
       arrowX2 = arrowX1 - arrowLength;
       arrowY2 = arrowY1;
       newBoxX = arrowX2 - boxWidth - gap;
-      newBoxY = sourceBox.y;
+      newBoxY = sourceBox.y + sourceBox.height / 2 - boxHeight / 2;
     }
 
     // Si el nuevo recuadro caería encima de uno existente (p. ej. clics repetidos o cerrar un
@@ -444,6 +460,64 @@ export class ProblemBuilder {
   }
 
   /**
+   * Geometría de una flecha en "L" entre recuadros: sale de 'src' en la dirección 'first' y dobla
+   * hacia 'second'. Devuelve los extremos de la flecha y la esquina superior izquierda del destino.
+   * 'opts': ancho (textWidth) y líneas (lines) de los reactivos, y tramos mínimos (minDx, minDy).
+   */
+  static bentLayout(src, first, second, width, height, opts = {}) {
+    const { textWidth = 0, lines = 0, minDx = 0, minDy = 0, gap = 16, endGap = gap } = opts;
+    const cx = src.x + src.width / 2, cy = src.y + src.height / 2;
+    const vertical = first === 'down' || first === 'up';
+    const sx = (first === 'right' || second === 'right') ? 1 : -1;
+    const sy = (first === 'down' || second === 'down') ? 1 : -1;
+    let x1, y1, dx, dy;
+    if (vertical) {
+      x1 = cx;
+      y1 = cy + sy * (src.height / 2 + gap);
+      // Los reactivos van a la derecha del tramo vertical; el destino queda por debajo/encima del origen
+      dx = Math.max(90, sx > 0 ? textWidth + 36 : 0);
+      dy = Math.max(90, lines * 20 + 30, height / 2 + 40 - gap);
+    } else {
+      x1 = cx + sx * (src.width / 2 + gap);
+      y1 = cy;
+      dx = Math.max(105, textWidth + 38);
+      dy = Math.max(76, lines * 20 + 30, src.height / 2 + 40 - endGap);
+    }
+    const x2 = x1 + sx * Math.max(dx, minDx);
+    const y2 = y1 + sy * Math.max(dy, minDy);
+    const boxX = vertical ? (sx > 0 ? x2 + endGap : x2 - endGap - width) : x2 - width / 2;
+    const boxY = vertical ? y2 - height / 2 : (sy > 0 ? y2 + endGap : y2 - endGap - height);
+    return { x1, y1, x2, y2, bend: vertical ? 'vh' : 'hv', boxX, boxY };
+  }
+
+  /**
+   * Siguiente paso con flecha doblada en "L" (p. ej. abajo + derecha, estilo IChO).
+   */
+  static extendBentFromBox(sourceBox, first, second, state) {
+    const width = 140;
+    const height = 110;
+    const rectOf = (p) => ({ x: p.boxX, y: p.boxY, width, height });
+
+    // Si el sitio está ocupado, alejar el destino en vertical; si ya está unido a este recuadro
+    // (clic repetido), no duplicar la flecha
+    let layout = this.bentLayout(sourceBox, first, second, width, height);
+    for (let i = 0; i < 60; i++) {
+      const hit = this.findOverlappingBox(rectOf(layout), state, sourceBox);
+      if (!hit) break;
+      if (this.arrowConnects(sourceBox, hit, state)) return { arrow: null, newBox: hit, reused: true };
+      layout = this.bentLayout(sourceBox, first, second, width, height, { minDy: Math.abs(layout.y2 - layout.y1) + 20 });
+    }
+
+    state.saveSnapshot();
+    const { x1, y1, x2, y2, bend } = layout;
+    const arrow = state.addArrow({ x1, y1, x2, y2, bend, type: 'normal', reagentsTop: '', reagentsBottom: '' });
+    const label = this.getNextLabel(state);
+    const newBox = state.addReferenceBox({ boxType: 'compound', label, unknownLetter: label, ...rectOf(layout) });
+    this.assignUnknownLetters(state);
+    return { arrow, newBox };
+  }
+
+  /**
    * Bifurca el esquema desde un recuadro origen para rutas paralelas / estereoquímica (Anti / Syn).
    * Genera una flecha de bifurcación (fork arrow) y dos recuadros de compuestos paralelos (arriba y abajo).
    */
@@ -451,8 +525,9 @@ export class ProblemBuilder {
     state.saveSnapshot();
 
     const dir = direction || sourceBox.activeAxis || 'right';
-    const boxWidth = sourceBox.width || 140;
-    const boxHeight = sourceBox.height || 110;
+    // Desde una incógnita compacta, el recuadro nuevo nace con tamaño normal para poder dibujar en él
+    const boxWidth = (!this.isCompact(sourceBox) && sourceBox.width) || 140;
+    const boxHeight = (!this.isCompact(sourceBox) && sourceBox.height) || 110;
     const branchSpacing = 150;
     const gap = 16;
     const stemLen = 70;
@@ -836,7 +911,7 @@ export class ProblemBuilder {
   }
 
   /**
-   * Al encajar el esquema, las incógnitas vacías al final de la ruta ocupan solo lo que mide
+   * Al encajar el esquema, las incógnitas vacías ocupan solo lo que mide
    * su letra (estilo IChO: "→ H1") en vez del tamaño de un recuadro de molécula.
    * No se hace al crear los recuadros, para que haya espacio donde dibujar la molécula.
    */
@@ -849,15 +924,14 @@ export class ProblemBuilder {
   }
 
   /**
-   * Reduce un recuadro de incógnita vacío (al final de la ruta) al tamaño de su letra,
+   * Reduce un recuadro de incógnita vacío al tamaño de su letra,
    * conservando el lado por el que llega su flecha para que la letra quede junto a la punta.
    * Los recuadros redimensionados a mano (userSized) no se tocan.
    */
   static compactEmptyBox(box, state) {
     if (!box || box.userSized) return;
     const letter = String(box.unknownLetter || box.label || 'A').trim() || 'A';
-    const W = Math.max(44, Math.round(letter.length * 23 + 18));
-    const H = 56;
+    const { W, H } = this.unknownSize(letter, Boolean(box.description && String(box.description).trim()));
     if (Math.abs(box.width - W) < 0.5 && Math.abs(box.height - H) < 0.5) return;
 
     const distToBox = (px, py) => {
@@ -866,13 +940,15 @@ export class ProblemBuilder {
       return Math.hypot(px - cx, py - cy);
     };
 
-    // Puntos donde llegan / salen flechas, con su dirección
+    // Puntos donde llegan flechas, con su dirección
     const ends = [];
-    const starts = [];
     for (const a of state.arrows.values()) {
       const sx = Math.sign(a.x2 - a.x1);
       const sy = Math.sign(a.y2 - a.y1);
-      const horizontal = Math.abs(a.x2 - a.x1) >= Math.abs(a.y2 - a.y1);
+      // En una flecha en "L" cuenta el último tramo, que es el que llega al recuadro
+      const horizontal = getArrowBendCorner(a)
+        ? a.bend === 'vh'
+        : Math.abs(a.x2 - a.x1) >= Math.abs(a.y2 - a.y1);
       const dir = horizontal ? { dx: sx, dy: 0 } : { dx: 0, dy: sy };
       if (a.type === 'fork') {
         if (horizontal) {
@@ -882,14 +958,10 @@ export class ProblemBuilder {
           ends.push({ x: a.xTop !== undefined ? a.xTop : a.x2, y: a.y2, dir });
           ends.push({ x: a.xBottom !== undefined ? a.xBottom : a.x2, y: a.y2, dir });
         }
-        starts.push({ x: a.x1, y: a.y1, dir });
       } else if (a.type === 'converge') {
         ends.push({ x: a.x2, y: a.y2, dir });
-        starts.push({ x: a.x1, y: a.yTop !== undefined ? a.yTop : a.y1, dir });
-        starts.push({ x: a.x1, y: a.yBottom !== undefined ? a.yBottom : a.y1, dir });
       } else {
         ends.push({ x: a.x2, y: a.y2, dir });
-        starts.push({ x: a.x1, y: a.y1, dir });
       }
     }
     const nearest = (pts) => {
@@ -900,11 +972,6 @@ export class ProblemBuilder {
       }
       return best;
     };
-
-    // Solo se compactan incógnitas al final de la ruta (sin flecha de salida): si ya sale una
-    // flecha, encoger el recuadro la separaría de él y el esquema dejaría de reconocer la conexión.
-    // Al extender desde una incógnita compacta, la flecha nueva ya nace junto a su letra.
-    if (nearest(starts)) return;
 
     const cx = box.x + box.width / 2;
     const cy = box.y + box.height / 2;

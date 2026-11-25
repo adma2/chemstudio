@@ -704,3 +704,8 @@ body.dark-mode .compound-unknown-title {
   box-shadow: 0 0 0 2px rgba(5, 150, 105, 0.4), 0 2px 4px rgba(0,0,0,0.15) !important;
 }
 
+
+/* Mientras se arrastra en el lienzo, el rótulo flotante no intercepta el ratón */
+.canvas-gesture .box-tag-editor {
+  pointer-events: none;
+}

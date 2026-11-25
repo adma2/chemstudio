@@ -377,8 +377,19 @@ export class SelectTool {
     }
     // Recuadros de abreviaturas: se seleccionan si el recuadro de selección toca cualquier parte de ellos
     for (const box of this.state.referenceBoxes.values()) {
-      if (box.boxType === 'compound') continue;
       const bx2 = box.x + box.width, by2 = box.y + box.height;
+      if (box.boxType === 'compound') {
+        // Incógnitas (letras): basta con que su centro quede dentro. Recuadros con molécula: si quedan
+        // enteros dentro o, con los recuadros ocultos, si se seleccionó toda su molécula.
+        const atoms = ProblemBuilder.getAtomsInsideBox(box, this.state);
+        const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+        const inside = atoms.length === 0
+          ? cx >= minX && cx <= maxX && cy >= minY && cy <= maxY
+          : (box.x >= minX && bx2 <= maxX && box.y >= minY && by2 <= maxY) ||
+            (!this.state.showCompoundBoxes && atoms.every(a => this.state.selected.atoms.has(a.id)));
+        if (inside) this.state.selected.boxes.add(box.id);
+        continue;
+      }
       if (box.x <= maxX && bx2 >= minX && box.y <= maxY && by2 >= minY) {
         this.state.selected.boxes.add(box.id);
       }

@@ -138,6 +138,7 @@ export class ChemApp {
    * o el que contiene todos los átomos seleccionados (útil con los recuadros ocultos).
    */
   getTaggableCompoundBox() {
+    if (this.state.selected.boxes.size > 1) return null; // selección múltiple: no hay un rótulo único que editar
     for (const id of this.state.selected.boxes) {
       const b = this.state.referenceBoxes.get(id);
       if (b && b.boxType === 'compound') return b;
@@ -524,6 +525,9 @@ export class ChemApp {
 
       const activeTool = this.tools[this.activeToolKey];
       if (activeTool && activeTool.onMouseDown) {
+        // Arrastre en curso: el rótulo flotante no debe interceptar el ratón (ver app.css)
+        this.canvasGesture = true;
+        this.svgElement.parentElement.classList.add('canvas-gesture');
         activeTool.onMouseDown(e, canvasPos, targetInfo);
       }
     });
@@ -554,6 +558,12 @@ export class ChemApp {
       const canvasPos = this.getCanvasCoordinates(e);
       const targetInfo = this.getTargetInfo(e);
 
+      // El botón se soltó donde no llegó el mouseup (p. ej. fuera de la ventana): terminar el arrastre
+      if (this.canvasGesture && e.buttons === 0) {
+        this.endCanvasGesture(e);
+        return;
+      }
+
       // Posición del cursor sobre el lienzo (Ctrl+V pega ahí); null si está fuera del lienzo
       const overCanvas = e.target && typeof e.target.closest === 'function' && e.target.closest('#chem-canvas');
       this.lastCanvasPos = overCanvas ? canvasPos : null;
@@ -577,19 +587,14 @@ export class ChemApp {
 
       // Si el mouseup se originó en la interfaz de usuario (barra lateral, herramientas, encabezado, modales),
       // no ejecutar herramientas de lienzo ni recrear inspectores para no invalidar los eventos click.
-      const isUi = Boolean(e.target.closest('.sidebar-right, .toolbar-left, .header, .status-bar, .modal-overlay, .box-tag-editor'));
+      // Excepción: si el arrastre empezó en el lienzo hay que terminarlo aunque se suelte sobre la interfaz;
+      // si no, lo seleccionado se queda pegado al cursor.
+      const isUi = !this.canvasGesture && Boolean(e.target.closest('.sidebar-right, .toolbar-left, .header, .status-bar, .modal-overlay, .box-tag-editor'));
       if (isUi) {
         return;
       }
 
-      const canvasPos = this.getCanvasCoordinates(e);
-      const targetInfo = this.getTargetInfo(e);
-      const activeTool = this.tools[this.activeToolKey];
-      if (activeTool && activeTool.onMouseUp) {
-        activeTool.onMouseUp(e, canvasPos, targetInfo);
-      }
-      this.updateInspectors();
-      this.updateValenceStatus();
+      this.endCanvasGesture(e);
     });
 
     this.svgElement.addEventListener('wheel', (e) => {
@@ -607,6 +612,18 @@ export class ChemApp {
 
       this.renderer.render();
     }, { passive: false });
+  }
+
+  /** Termina la acción en curso de la herramienta activa (soltar el ratón) */
+  endCanvasGesture(e) {
+    this.canvasGesture = false;
+    this.svgElement.parentElement.classList.remove('canvas-gesture');
+    const activeTool = this.tools[this.activeToolKey];
+    if (activeTool && activeTool.onMouseUp) {
+      activeTool.onMouseUp(e, this.getCanvasCoordinates(e), this.getTargetInfo(e));
+    }
+    this.updateInspectors();
+    this.updateValenceStatus();
   }
 
   initUiEvents() {
@@ -1858,6 +1875,21 @@ export class ChemApp {
         this.renderer.render();
         this.updateInspectors();
       }
+    });
+
+    // Siguiente paso con flecha doblada en L (abajo + derecha, etc.)
+    document.querySelectorAll('[data-bent-step]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const box = this.state.referenceBoxes.get(Array.from(this.state.selected.boxes)[0]);
+        if (!box) return;
+        const [first, second] = btn.dataset.bentStep.split(' ');
+        box.activeAxis = first;
+        const step = ProblemBuilder.extendBentFromBox(box, first, second, this.state);
+        this.state.clearSelection();
+        this.state.selected.boxes.add(step.newBox.id);
+        this.renderer.render();
+        this.updateInspectors();
+      });
     });
 
     document.getElementById('btn-finish-problem-mode')?.addEventListener('click', () => {
