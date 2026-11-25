@@ -4,7 +4,7 @@
  * con espaciado amplio y alineación lateral para flechas verticales.
  */
 
-import { formatChemicalFormula, renderFormattedSvgText, getArrowBendCorner } from '../chem-engine/elements.js';
+import { formatChemicalFormula, renderFormattedSvgText, getArrowBendCorner, getMoleculeBoundingBox } from '../chem-engine/elements.js';
 import { ReferenceBoxRenderer } from './reference-box.js';
 
 export class ArrowRenderer {
@@ -151,7 +151,7 @@ export class ArrowRenderer {
           midY,
           'start',
           'reagent-vertical',
-          isDark
+          isDark, state, id
         );
         group.appendChild(textGroup);
       }
@@ -175,7 +175,7 @@ export class ArrowRenderer {
       // Reactivos Arriba (incluyendo molécula si existe)
       const hasTopText = reagentsTop && reagentsTop.trim() !== '';
       const topLines = hasTopText ? reagentsTop.split('\n') : [];
-      const textHeight = topLines.length * 19;
+      const textHeight = this.reagentsSize(reagentsTop, state).height;
       const maxChars = hasTopText ? Math.max(...topLines.map(l => l.length)) : 0;
       const textWidth = hasTopText ? maxChars * 8.5 + 4 : 0;
 
@@ -218,7 +218,7 @@ export class ArrowRenderer {
             midY + ny * dist,
             'middle',
             'reagent-top',
-            isDark
+            isDark, state, id
           );
           group.appendChild(topGroup);
         }
@@ -230,22 +230,21 @@ export class ArrowRenderer {
           midY + ny * (offsetTop + textHeight / 2),
           'middle',
           'reagent-top',
-          isDark
+          isDark, state, id
         );
         group.appendChild(topGroup);
       }
 
       // Reactivos Abajo
       if (reagentsBottom && reagentsBottom.trim() !== '') {
-        const lines = reagentsBottom.split('\n');
-        const textHeight = lines.length * 19;
+        const textHeight = this.reagentsSize(reagentsBottom, state).height;
         const bottomGroup = this.renderReagentsText(
           reagentsBottom,
           midX - nx * (offsetBottom + textHeight / 2),
           midY - ny * (offsetBottom + textHeight / 2),
           'middle',
           'reagent-bottom',
-          isDark
+          isDark, state, id
         );
         group.appendChild(bottomGroup);
       }
@@ -366,29 +365,27 @@ export class ArrowRenderer {
     const offsetBottom = 11;
 
     if (reagentsTop && reagentsTop.trim() !== '') {
-      const lines = reagentsTop.split('\n');
-      const textHeight = lines.length * 19;
+      const textHeight = this.reagentsSize(reagentsTop, state).height;
       const topGroup = this.renderReagentsText(
         reagentsTop,
         midStemX,
         y1 - (offsetTop + textHeight / 2),
         'middle',
         'reagent-top',
-        isDark
+        isDark, state, id
       );
       group.appendChild(topGroup);
     }
 
     if (reagentsBottom && reagentsBottom.trim() !== '') {
-      const lines = reagentsBottom.split('\n');
-      const textHeight = lines.length * 19;
+      const textHeight = this.reagentsSize(reagentsBottom, state).height;
       const bottomGroup = this.renderReagentsText(
         reagentsBottom,
         midStemX,
         y1 + (offsetBottom + textHeight / 2),
         'middle',
         'reagent-bottom',
-        isDark
+        isDark, state, id
       );
       group.appendChild(bottomGroup);
     }
@@ -488,29 +485,27 @@ export class ArrowRenderer {
     const offsetBottom = 11;
 
     if (reagentsTop && reagentsTop.trim() !== '') {
-      const lines = reagentsTop.split('\n');
-      const textHeight = lines.length * 19;
+      const textHeight = this.reagentsSize(reagentsTop, state).height;
       const topGroup = this.renderReagentsText(
         reagentsTop,
         stemMidX,
         yMid - (offsetTop + textHeight / 2),
         'middle',
         'reagent-top',
-        isDark
+        isDark, state, id
       );
       group.appendChild(topGroup);
     }
 
     if (reagentsBottom && reagentsBottom.trim() !== '') {
-      const lines = reagentsBottom.split('\n');
-      const textHeight = lines.length * 19;
+      const textHeight = this.reagentsSize(reagentsBottom, state).height;
       const bottomGroup = this.renderReagentsText(
         reagentsBottom,
         stemMidX,
         yMid + (offsetBottom + textHeight / 2),
         'middle',
         'reagent-bottom',
-        isDark
+        isDark, state, id
       );
       group.appendChild(bottomGroup);
     }
@@ -526,7 +521,114 @@ export class ArrowRenderer {
     return group;
   }
 
-  static renderReagentsText(text, x, y, anchor = 'middle', className = '', isDark = false) {
+  /** Expresión que encuentra nombres de moléculas (MO1...) como palabra completa; null si no hay moléculas */
+  static moleculeRegex(state) {
+    if (!state || !state.molecules || state.molecules.size === 0) return null;
+    const names = Array.from(state.molecules.keys()).sort((a, b) => b.length - a.length);
+    return new RegExp(`(?<![\\p{L}\\p{N}_])(${names.join('|')})(?![\\p{L}\\p{N}_])`, 'u');
+  }
+
+  /**
+   * Reparte los reactivos en filas de texto y moléculas dibujadas. Devuelve null si el texto no
+   * nombra ninguna molécula (entonces se dibuja como texto normal).
+   */
+  static layoutReagents(text, state) {
+    const re = text && this.moleculeRegex(state);
+    if (!re || !re.test(text)) return null;
+    const GAP = 6;
+    const rows = text.split('\n').map(line => {
+      // split con un grupo de captura: las posiciones impares son los nombres encontrados
+      const segs = line.split(re).map((part, i) => {
+        if (i % 2 === 1) {
+          const metrics = this.getInlineMoleculeMetrics(state.molecules.get(part));
+          if (metrics) return { name: part, metrics, width: metrics.dispW, height: metrics.dispH + 8 };
+        }
+        const t = part.trim();
+        return t ? { text: t, width: t.length * 8.2, height: 20 } : null;
+      }).filter(Boolean);
+      return {
+        segs,
+        width: segs.reduce((w, s) => w + s.width, 0) + GAP * Math.max(0, segs.length - 1),
+        height: Math.max(20, ...segs.map(s => s.height))
+      };
+    });
+    return {
+      rows, gap: GAP,
+      width: Math.max(...rows.map(r => r.width)),
+      height: rows.reduce((h, r) => h + r.height, 0)
+    };
+  }
+
+  /** Ancho y alto aproximados que ocupan los reactivos (con sus moléculas dibujadas) */
+  static reagentsSize(text, state) {
+    if (!text || !text.trim()) return { width: 0, height: 0 };
+    const layout = this.layoutReagents(text, state);
+    if (layout) return { width: layout.width, height: layout.height };
+    const lines = text.split('\n');
+    return { width: Math.max(...lines.map(l => l.length)) * 8.2, height: lines.length * 19 };
+  }
+
+  /** Medidas de una molécula dentro de los reactivos, contando sus etiquetas (OMe, OBn...) */
+  static getInlineMoleculeMetrics(structObj) {
+    if (!structObj || !structObj.atoms || structObj.atoms.length === 0) return null;
+    const atoms = new Map(structObj.atoms.map(a => [a.id, a]));
+    const bonds = new Map((structObj.bonds || []).map(b => [b.id, b]));
+    const b = getMoleculeBoundingBox(structObj.atoms, { atoms, bonds, getAtom: (id) => atoms.get(id) }, 0);
+    const rawW = Math.max(25, b.maxX - b.minX);
+    const rawH = Math.max(25, b.maxY - b.minY);
+    // 0.9: las etiquetas (OMe...) quedan casi del tamaño del texto de los reactivos
+    const scale = Math.min(0.9, 110 / rawH, 190 / rawW);
+    return {
+      structObj, minX: b.minX, maxX: b.maxX, minY: b.minY, maxY: b.maxY, rawW, rawH, scale,
+      dispW: Math.round(rawW * scale), dispH: Math.round(rawH * scale)
+    };
+  }
+
+  static renderReagentsLayout(layout, x, y, anchor, className, isDark, arrowId) {
+    const NS = 'http://www.w3.org/2000/svg';
+    const group = document.createElementNS(NS, 'g');
+    group.setAttribute('class', `reagent-text ${className}`);
+    let top = y - layout.height / 2;
+    for (const row of layout.rows) {
+      const cy = top + row.height / 2;
+      let cx = anchor === 'start' ? x : x - row.width / 2;
+      for (const seg of row.segs) {
+        if (seg.metrics) {
+          const m = seg.metrics;
+          const g = document.createElementNS(NS, 'g');
+          g.setAttribute('class', 'arrow-reagent-struct');
+          g.setAttribute('data-arrow-id', arrowId);
+          g.setAttribute('data-molecule', seg.name);
+          g.style.cursor = 'pointer';
+          const tx = cx + seg.width / 2 - ((m.minX + m.maxX) / 2) * m.scale;
+          const ty = cy - ((m.minY + m.maxY) / 2) * m.scale;
+          g.setAttribute('transform', `translate(${tx}, ${ty}) scale(${m.scale})`);
+          const tip = document.createElementNS(NS, 'title');
+          tip.textContent = `${seg.name} · Clic para editar`;
+          g.appendChild(tip);
+          ReferenceBoxRenderer.renderStructureThumbnail(m, g, isDark);
+          group.appendChild(g);
+        } else {
+          const t = document.createElementNS(NS, 'text');
+          t.setAttribute('x', cx + seg.width / 2);
+          t.setAttribute('y', cy + 5);
+          t.setAttribute('text-anchor', 'middle');
+          t.setAttribute('font-family', 'Arial, Helvetica, sans-serif');
+          t.setAttribute('font-size', '16');
+          t.setAttribute('fill', isDark ? '#ffffff' : '#111827');
+          this.populateFormattedTspan(t, seg.text);
+          group.appendChild(t);
+        }
+        cx += seg.width + layout.gap;
+      }
+      top += row.height;
+    }
+    return group;
+  }
+
+  static renderReagentsText(text, x, y, anchor = 'middle', className = '', isDark = false, state = null, arrowId = null) {
+    const layout = this.layoutReagents(text, state);
+    if (layout) return this.renderReagentsLayout(layout, x, y, anchor, className, isDark, arrowId);
     const lines = text.split('\n');
     const textElem = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     textElem.setAttribute('x', x);

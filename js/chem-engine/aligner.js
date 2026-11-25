@@ -1,5 +1,6 @@
 import { getMoleculeBoundingBox, getAllMolecules, getConnectedMoleculeAtoms, getArrowBendCorner } from './elements.js';
 import { ProblemBuilder } from './problem-builder.js';
+import { ArrowRenderer } from '../render/arrow-renderer.js';
 
 export class ChemAligner {
   /**
@@ -545,8 +546,9 @@ export class ChemAligner {
       // Medir longitud requerida por los reactivos y moléculas sobre la flecha
       const topLines = (arrow.reagentsTop || '').split('\n').filter(Boolean);
       const bottomLines = (arrow.reagentsBottom || '').split('\n').filter(Boolean);
-      const maxChars = Math.max(0, ...topLines.map(l => l.length), ...bottomLines.map(l => l.length));
-      const requiredTextWidth = maxChars * 8.2;
+      const topSize = ArrowRenderer.reagentsSize(arrow.reagentsTop, state);
+      const bottomSize = ArrowRenderer.reagentsSize(arrow.reagentsBottom, state);
+      const requiredTextWidth = Math.max(topSize.width, bottomSize.width);
 
       // Medir anchura de molécula sobre la flecha (ej. dieno para Diels-Alder)
       let topMolWidth = 0;
@@ -562,19 +564,21 @@ export class ChemAligner {
             if (a.x > maxX) maxX = a.x;
           }
           const rawW = Math.max(30, maxX - minX);
-          topMolWidth = Math.round(rawW * 0.8) + 16;
+          topMolWidth = Math.round(rawW * 0.65) + 16; // misma escala con la que se dibuja
         }
       }
 
-      const topLineWidth = topLines.length > 0 ? Math.max(...topLines.map(l => l.length)) * 8.2 : 0;
-      const totalTopAssemblyWidth = topMolWidth + (topMolWidth > 0 && topLineWidth > 0 ? topLineWidth + 8 : topLineWidth);
-      const requiredAssemblyWidth = Math.max(requiredTextWidth, totalTopAssemblyWidth);
+      // El texto va encima de la molécula, no a su lado: cuenta el más ancho de los dos
+      const requiredAssemblyWidth = Math.max(requiredTextWidth, topMolWidth);
 
       // Flechas horizontales: se expanden según la anchura requerida por reactivos y moléculas
       const desiredArrowLen = Math.max(105, Math.round(requiredAssemblyWidth + 38));
       // Flechas verticales: el texto se escribe horizontalmente a la derecha, por lo que NO deben alargarse verticalmente por la cantidad de caracteres
-      const numLines = topLines.length + bottomLines.length;
-      const desiredVerticalLen = Math.max(72, Math.min(95, Math.round(numLines * 16 + 28)));
+      // (salvo que lleven moléculas dibujadas al lado, que sí necesitan su altura)
+      const hasMolecules = [arrow.reagentsTop, arrow.reagentsBottom].some(txt => ArrowRenderer.layoutReagents(txt, state));
+      const reagentsHeight = topSize.height + bottomSize.height;
+      const numLines = hasMolecules ? Math.ceil(reagentsHeight / 20) : topLines.length + bottomLines.length;
+      const desiredVerticalLen = Math.max(72, Math.min(95, Math.round(numLines * 16 + 28)), hasMolecules ? reagentsHeight + 16 : 0);
 
       // Buscar entidad de origen (cercana al inicio de la flecha)
       let source = null;
@@ -618,10 +622,6 @@ export class ChemAligner {
       }
 
       if (arrow.type === 'fork') {
-        const topLines = (arrow.reagentsTop || '').split('\n').filter(Boolean);
-        const bottomLines = (arrow.reagentsBottom || '').split('\n').filter(Boolean);
-        const maxChars = Math.max(0, ...topLines.map(l => l.length), ...bottomLines.map(l => l.length));
-        const requiredTextWidth = maxChars * 8.2;
         const stemLen = Math.max(70, Math.round(requiredTextWidth + 32));
         const branchLen = 50;
 
@@ -738,10 +738,6 @@ export class ChemAligner {
       }
 
       if (arrow.type === 'converge') {
-        const topLines = (arrow.reagentsTop || '').split('\n').filter(Boolean);
-        const bottomLines = (arrow.reagentsBottom || '').split('\n').filter(Boolean);
-        const maxChars = Math.max(0, ...topLines.map(l => l.length), ...bottomLines.map(l => l.length));
-        const requiredTextWidth = maxChars * 8.2;
         const stemLen = Math.max(70, Math.round(requiredTextWidth + 32));
         const branchLen = 45;
 

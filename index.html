@@ -296,17 +296,18 @@
 
         <div class="form-group" style="margin-top: 10px; border-top: 1px dashed #cbd5e1; padding-top: 8px;">
           <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
-            <label class="form-label" style="margin-bottom: 0; font-weight: 600;">Molécula sobre la Flecha:</label>
+            <label class="form-label" style="margin-bottom: 0; font-weight: 600;">Moléculas con nombre:</label>
             <span id="arrow-struct-badge" style="font-size: 10px; color: #2563eb; font-weight: bold; background: rgba(37,99,235,0.12); padding: 1px 6px; border-radius: 4px; display: none;">🔬 Asignada</span>
           </div>
           <p style="font-size: 11px; color: #64748b; margin-bottom: 6px;">
-            Dibuja o añade un reactivo sobre la flecha (ej. dieno para Diels-Alder, alqueno, etc.):
+            Dibuja una molécula y ponle nombre (ej. MO1). Al escribir ese nombre en los reactivos de arriba o de abajo, se dibuja ahí:
           </p>
+          <div id="arrow-molecule-list" style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px;"></div>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 4px;">
-            <button class="btn btn-sm btn-primary" id="btn-draw-arrow-struct" style="font-size: 11px;" title="Abrir pizarra ChemStudio para dibujar la molécula sobre la flecha">
+            <button class="btn btn-sm btn-primary" id="btn-draw-arrow-struct" style="font-size: 11px;" title="Abrir pizarra ChemStudio para dibujar una molécula y ponerle nombre">
               ✏️ Dibujar Molécula
             </button>
-            <button class="btn btn-sm btn-outline" id="btn-import-selection-to-arrow" style="font-size: 11px;" title="Importar la molécula seleccionada en el lienzo a esta flecha">
+            <button class="btn btn-sm btn-outline" id="btn-import-selection-to-arrow" style="font-size: 11px;" title="Guardar con nombre la molécula seleccionada en el lienzo y ponerla arriba de esta flecha">
               📥 De Selección
             </button>
           </div>

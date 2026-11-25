@@ -1939,3 +1939,27 @@ console.log('\n--- TEST: Arrastrar una molécula seleccionada con el recuadro --
   console.assert(st.selected.boxes.has(l1.id) && st.selected.boxes.has(l2.id) && !st.selected.boxes.has(far.id), 'La selección con recuadro incluye solo las letras que rodea');
   console.log('✓ Las letras de incógnita se seleccionan con el recuadro');
 }
+
+// Moléculas con nombre (MO1) en los reactivos de las flechas
+{
+  const st = new ChemState();
+  const struct = { atoms: [{ id: 'm1', x: 0, y: 0, element: 'C' }, { id: 'm2', x: 38, y: 0, element: 'O', label: 'OMe', manualLabel: true }], bonds: [{ id: 'mb', atom1: 'm1', atom2: 'm2', type: 'single' }] };
+  st.saveSnapshot();
+  st.molecules.set('MO1', struct);
+  const ar = st.addArrow({ x1: 0, y1: 0, x2: 100, y2: 0, reagentsTop: '1) MO1, NaH', reagentsBottom: 'MO10' });
+  const { ArrowRenderer: AR } = await import('../js/render/arrow-renderer.js');
+  const lay = AR.layoutReagents(ar.reagentsTop, st);
+  console.assert(lay && lay.rows[0].segs.map(s => s.name || s.text).join('|') === '1)|MO1|, NaH', 'MO1 se dibuja dentro del texto');
+  console.assert(AR.layoutReagents(ar.reagentsBottom, st) === null, 'MO10 no se confunde con MO1');
+  console.assert(st.nextMoleculeName() === 'MO2', 'Siguiente nombre libre');
+  st.renameMolecule('MO1', 'Wittig');
+  console.assert(ar.reagentsTop === '1) Wittig, NaH' && ar.reagentsBottom === 'MO10', 'Renombrar actualiza los reactivos');
+  const copy = new ChemState();
+  copy.loadFromObject(JSON.parse(JSON.stringify(ChemSerializer.serialize(st))), false);
+  console.assert(copy.molecules.get('Wittig')?.atoms.length === 2, 'Las moléculas se guardan en el JSON');
+  st.undo();
+  console.assert(st.molecules.size === 0, 'Deshacer quita la molécula');
+  st.redo();
+  console.assert(st.molecules.has('Wittig'), 'Rehacer la recupera');
+  console.log('✓ Moléculas con nombre: texto, renombrar, guardar y deshacer');
+}

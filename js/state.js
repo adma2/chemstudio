@@ -12,6 +12,8 @@ export class ChemState {
     this.arrows = new Map();
     this.referenceBoxes = new Map();
     this.textLabels = new Map();
+    // Moléculas con nombre (MO1, MO2...) que se dibujan al escribir su nombre en los reactivos
+    this.molecules = new Map();
 
     // Selección actual
     this.selected = {
@@ -69,6 +71,30 @@ export class ChemState {
     }
   }
 
+  /** Moléculas con nombre en formato de lista (para guardar y deshacer) */
+  moleculeList() {
+    return Array.from(this.molecules, ([name, structure]) => ({ id: name, structure }));
+  }
+
+  /** Primer nombre libre: MO1, MO2... */
+  nextMoleculeName() {
+    let i = 1;
+    while (this.molecules.has(`MO${i}`)) i++;
+    return `MO${i}`;
+  }
+
+  /** Cambia el nombre de una molécula y lo actualiza en los reactivos de todas las flechas */
+  renameMolecule(oldName, newName) {
+    const structure = this.molecules.get(oldName);
+    if (!structure || oldName === newName) return;
+    this.molecules.delete(oldName);
+    this.molecules.set(newName, structure);
+    const re = new RegExp(`(?<![\\p{L}\\p{N}_])${oldName}(?![\\p{L}\\p{N}_])`, 'gu');
+    for (const a of this.arrows.values()) {
+      for (const k of ['reagentsTop', 'reagentsBottom']) if (a[k]) a[k] = a[k].replace(re, newName);
+    }
+  }
+
   /** Estado actual serializado (lo que guarda un paso de Deshacer) */
   makeSnapshot() {
     return JSON.stringify({
@@ -76,7 +102,8 @@ export class ChemState {
       bonds: Array.from(this.bonds.values()).map(b => ({ ...b })),
       arrows: Array.from(this.arrows.values()).map(a => ({ ...a })),
       referenceBoxes: Array.from(this.referenceBoxes.values()).map(r => ({ ...r })),
-      textLabels: Array.from(this.textLabels.values()).map(l => ({ ...l }))
+      textLabels: Array.from(this.textLabels.values()).map(l => ({ ...l })),
+      molecules: this.moleculeList()
     });
   }
 
@@ -91,14 +118,7 @@ export class ChemState {
 
   undo() {
     if (this.undoStack.length === 0) return;
-    const current = {
-      atoms: Array.from(this.atoms.values()).map(a => ({ ...a })),
-      bonds: Array.from(this.bonds.values()).map(b => ({ ...b })),
-      arrows: Array.from(this.arrows.values()).map(a => ({ ...a })),
-      referenceBoxes: Array.from(this.referenceBoxes.values()).map(r => ({ ...r })),
-      textLabels: Array.from(this.textLabels.values()).map(l => ({ ...l }))
-    };
-    this.redoStack.push(JSON.stringify(current));
+    this.redoStack.push(this.makeSnapshot());
 
     const previous = JSON.parse(this.undoStack.pop());
     this.loadFromObject(previous, false);
@@ -107,14 +127,7 @@ export class ChemState {
 
   redo() {
     if (this.redoStack.length === 0) return;
-    const current = {
-      atoms: Array.from(this.atoms.values()).map(a => ({ ...a })),
-      bonds: Array.from(this.bonds.values()).map(b => ({ ...b })),
-      arrows: Array.from(this.arrows.values()).map(a => ({ ...a })),
-      referenceBoxes: Array.from(this.referenceBoxes.values()).map(r => ({ ...r })),
-      textLabels: Array.from(this.textLabels.values()).map(l => ({ ...l }))
-    };
-    this.undoStack.push(JSON.stringify(current));
+    this.undoStack.push(this.makeSnapshot());
 
     const next = JSON.parse(this.redoStack.pop());
     this.loadFromObject(next, false);
@@ -520,6 +533,7 @@ export class ChemState {
     this.arrows.clear();
     this.referenceBoxes.clear();
     this.textLabels.clear();
+    this.molecules.clear();
     this.clearSelection();
     this.updateValences();
     this.emit('change');
@@ -579,6 +593,7 @@ export class ChemState {
     this.arrows.clear();
     this.referenceBoxes.clear();
     this.textLabels.clear();
+    this.molecules.clear();
     this.clearSelection();
 
     if (data.atoms) {
@@ -595,6 +610,9 @@ export class ChemState {
     }
     if (data.textLabels) {
       for (const l of data.textLabels) this.textLabels.set(l.id, { ...l });
+    }
+    if (Array.isArray(data.molecules)) {
+      for (const m of data.molecules) if (m && m.id && m.structure) this.molecules.set(String(m.id), m.structure);
     }
     if (data.showCompoundBoxes !== undefined) {
       this.showCompoundBoxes = data.showCompoundBoxes;

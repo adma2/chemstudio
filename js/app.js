@@ -425,7 +425,7 @@ export class ChemApp {
 
     const arrowStructGroup = closest('.arrow-reagent-struct');
     if (arrowStructGroup) {
-      return { isArrowStruct: true, arrowId: arrowStructGroup.dataset.arrowId };
+      return { isArrowStruct: true, arrowId: arrowStructGroup.dataset.arrowId, molecule: arrowStructGroup.dataset.molecule || null };
     }
 
     const arrowGroup = closest('.reaction-arrow');
@@ -518,7 +518,7 @@ export class ChemApp {
           this.state.selected.arrows.add(arrow.id);
           this.renderer.render();
           this.updateInspectors();
-          this.openArrowStructureModal(arrow);
+          this.openArrowStructureModal(arrow, targetInfo.molecule);
         }
         return;
       }
@@ -1201,6 +1201,10 @@ export class ChemApp {
       }
     };
 
+    // Campo donde se insertará el nombre de una molécula al pulsarla en la lista
+    this.lastReagentInput = topInput;
+    for (const el of [topInput, bottomInput]) el?.addEventListener('focus', () => { this.lastReagentInput = el; });
+
     topInput?.addEventListener('input', updateArrowReagents);
     bottomInput?.addEventListener('input', updateArrowReagents);
 
@@ -1232,12 +1236,12 @@ export class ChemApp {
       const atomIdSet = new Set(selAtomIds);
       const bondsToCopy = Array.from(this.state.bonds.values()).filter(b => atomIdSet.has(b.atom1) && atomIdSet.has(b.atom2));
 
-      arrow.structureTop = {
-        version: '1.0',
+      const name = this.state.nextMoleculeName();
+      this.state.molecules.set(name, {
         atoms: atomsToCopy.map(a => ({ ...a })),
-        bonds: bondsToCopy.map(b => ({ ...b })),
-        arrows: []
-      };
+        bonds: bondsToCopy.map(b => ({ ...b }))
+      });
+      arrow.reagentsTop = [arrow.reagentsTop, name].filter(x => x && x.trim()).join('\n');
 
       this.renderer.render();
       this.updateInspectors();
@@ -2007,6 +2011,7 @@ export class ChemApp {
         arrowSection.style.display = 'block';
         document.getElementById('arrow-reagents-top').value = arrow.reagentsTop || '';
         document.getElementById('arrow-reagents-bottom').value = arrow.reagentsBottom || '';
+        this.renderArrowMoleculeList(arrow);
         const badge = document.getElementById('arrow-struct-badge');
         const drawBtn = document.getElementById('btn-draw-arrow-struct');
         const clearBtn = document.getElementById('btn-clear-arrow-struct');
@@ -2075,6 +2080,36 @@ export class ChemApp {
     } else {
       if (boxSection) boxSection.style.display = 'none';
       if (compoundBoxSection) compoundBoxSection.style.display = 'none';
+    }
+  }
+
+  /** Lista de moléculas con nombre en el panel de la flecha: clic inserta el nombre, ✎ la edita */
+  renderArrowMoleculeList(arrow) {
+    const list = document.getElementById('arrow-molecule-list');
+    if (!list) return;
+    list.innerHTML = '';
+    for (const name of this.state.molecules.keys()) {
+      const add = document.createElement('button');
+      add.className = 'btn btn-sm btn-outline';
+      add.style.cssText = 'padding: 2px 6px; font-size: 11px; font-weight: bold;';
+      add.textContent = name;
+      add.title = `Poner ${name} en el último campo de reactivos usado`;
+      add.addEventListener('click', () => {
+        const el = this.lastReagentInput;
+        if (!el) return;
+        el.value = [el.value, name].filter(x => x && x.trim()).join('\n');
+        el.dispatchEvent(new Event('input'));
+      });
+      const edit = document.createElement('button');
+      edit.className = 'btn btn-sm btn-outline';
+      edit.style.cssText = 'padding: 2px 5px; font-size: 11px;';
+      edit.textContent = '✎';
+      edit.title = `Editar ${name}`;
+      edit.addEventListener('click', () => this.openArrowStructureModal(arrow, name));
+      const item = document.createElement('span');
+      item.style.cssText = 'display: inline-flex;';
+      item.append(add, edit);
+      list.appendChild(item);
     }
   }
 
@@ -3095,8 +3130,12 @@ export class ChemApp {
     });
   }
 
-  openArrowStructureModal(arrow) {
+  /** Editor de moléculas para flechas: crea una molécula con nombre, o edita la llamada 'molName' */
+  openArrowStructureModal(arrow, molName = null) {
     if (!arrow) return;
+    const editing = molName && this.state.molecules.has(molName) ? molName : null;
+    const initialStructure = editing ? this.state.molecules.get(editing) : arrow.structureTop;
+    const groups = ['OMe', 'OBn', 'OAc', 'OTs', 'OMs', 'OTBS', 'OTBDPS', 'OBz', 'Me', 'Et', 'iPr', 'tBu', 'Ph', 'Bn', 'Boc', 'Fmoc', 'NHBoc', 'NO2', 'CN', 'COOH', 'COOMe', 'CF3'];
 
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay chemstudio-modal-overlay';
@@ -3123,11 +3162,12 @@ export class ChemApp {
         <header class="header" style="height: auto; min-height: 48px; flex-shrink: 0; flex-wrap: wrap; gap: 6px 12px; border-bottom: 1px solid ${isDark ? '#1e293b' : '#e2e8f0'}; background: ${isDark ? '#0f172a' : '#ffffff'}; display: flex; align-items: center; justify-content: space-between; padding: 6px 16px;">
           <div style="display: flex; align-items: center; gap: 14px;">
             <span class="logo" style="font-size: 15px; font-weight: bold; color: ${isDark ? '#60a5fa' : '#2563eb'}; display: flex; align-items: center; gap: 6px;">
-              ⬡ Chem Studio <span style="font-size: 12px; font-weight: normal; color: ${isDark ? '#94a3b8' : '#64748b'};">| Reactivo / Molécula sobre Flecha (ej. Diels-Alder)</span>
+              ⬡ Chem Studio <span style="font-size: 12px; font-weight: normal; color: ${isDark ? '#94a3b8' : '#64748b'};">| Molécula para Flecha</span>
             </span>
             <div style="display: flex; align-items: center; gap: 8px; background: ${isDark ? '#1e293b' : '#f1f5f9'}; padding: 3px 10px; border-radius: 6px; border: 1px solid ${isDark ? '#334155' : '#cbd5e1'};">
-              <span style="font-size: 11px; font-weight: bold; color: ${isDark ? '#60a5fa' : '#2563eb'};">➔ Flecha Seleccionada</span>
-              <span style="font-size: 11px; color: ${isDark ? '#94a3b8' : '#64748b'};">Molécula se colocará en el centro superior del eje</span>
+              <label for="modal-arrow-name" style="font-size: 11px; font-weight: bold; color: ${isDark ? '#60a5fa' : '#2563eb'};">Nombre:</label>
+              <input type="text" id="modal-arrow-name" class="form-input" maxlength="12" spellcheck="false" value="${escapeHtml(editing || this.state.nextMoleculeName())}" style="width: 110px; height: 26px; font-size: 13px; font-weight: bold; text-align: center;" title="Nombre con el que la escribirás en los reactivos (letras, números y _)" />
+              <span style="font-size: 11px; color: ${isDark ? '#94a3b8' : '#64748b'};">Escríbelo en los reactivos para dibujarla</span>
             </div>
           </div>
 
@@ -3138,7 +3178,7 @@ export class ChemApp {
             <button class="btn btn-sm" id="modal-arrow-clear" title="Limpiar pizarra">🗑 Limpiar</button>
             <div style="width: 1px; height: 24px; background: ${isDark ? '#334155' : '#e2e8f0'}; margin: 0 4px;"></div>
             <button class="btn btn-sm" id="modal-arrow-cancel">✕ Cancelar</button>
-            <button class="btn btn-sm btn-primary" id="modal-arrow-save" style="font-weight: bold; background: #2563eb; color: #ffffff; padding: 5px 16px; font-size: 13px;">💾 Guardar Molécula en Flecha</button>
+            <button class="btn btn-sm btn-primary" id="modal-arrow-save" style="font-weight: bold; background: #2563eb; color: #ffffff; padding: 5px 16px; font-size: 13px;">💾 Guardar Molécula</button>
           </div>
         </header>
 
@@ -3218,6 +3258,19 @@ export class ChemApp {
             </div>
 
             <div>
+              <div style="font-size: 11px; font-weight: bold; text-transform: uppercase; color: ${isDark ? '#94a3b8' : '#64748b'}; margin-bottom: 6px; letter-spacing: 0.5px;">
+                Grupos comunes
+              </div>
+              <div style="display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 6px;">
+                ${groups.map(g => `<button class="btn btn-sm btn-outline modal-elem-btn" data-elem="${g}" style="padding: 2px 6px; font-size: 11px;">${g}</button>`).join('')}
+              </div>
+              <div style="display: flex; gap: 4px;">
+                <input type="text" id="modal-arrow-group" class="form-input" maxlength="14" spellcheck="false" placeholder="Otro (ej. OPMB)" style="flex: 1; min-width: 0; font-size: 12px;" />
+                <button class="btn btn-sm btn-primary" id="modal-arrow-group-btn" style="font-size: 11px;">Usar</button>
+              </div>
+            </div>
+
+            <div>
               <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
                 <span style="font-size: 11px; font-weight: bold; text-transform: uppercase; color: ${isDark ? '#94a3b8' : '#64748b'}; letter-spacing: 0.5px;">
                   Reactivos Diels-Alder
@@ -3236,14 +3289,14 @@ export class ChemApp {
               <button id="modal-arrow-capture-btn" class="btn btn-sm btn-primary" style="width: 100%; justify-content: center; font-size: 11px; padding: 6px;" title="Copiar la molécula seleccionada del lienzo principal a esta pizarra">
                 📥 Copiar Selección del Lienzo
               </button>
-              <button id="modal-arrow-delete-btn" class="btn btn-sm btn-outline" style="width: 100%; justify-content: center; font-size: 11px; padding: 5px; color: #ef4444;" title="Eliminar completamente la molécula de la flecha">
-                🗑️ Quitar Molécula de la Flecha
+              <button id="modal-arrow-delete-btn" class="btn btn-sm btn-outline" style="width: 100%; justify-content: center; font-size: 11px; padding: 5px; color: #ef4444;" title="Eliminar esta molécula">
+                🗑️ Eliminar Molécula
               </button>
             </div>
 
             <div style="background: ${isDark ? '#1e293b' : '#f1f5f9'}; border: 1px solid ${isDark ? '#334155' : '#cbd5e1'}; border-radius: 6px; padding: 8px; font-size: 11px; color: ${isDark ? '#cbd5e1' : '#475569'}; line-height: 1.4; margin-top: auto;">
-              <strong style="color: ${isDark ? '#60a5fa' : '#2563eb'};">💡 Reactivo sobre la Flecha:</strong><br/>
-              Al hacer clic en <b>Guardar Molécula en Flecha</b>, esta estructura se dibujará vectorialmente arriba de la flecha. La longitud de la flecha se adaptará automáticamente para evitar colisiones.
+              <strong style="color: ${isDark ? '#60a5fa' : '#2563eb'};">💡 Cómo usarla:</strong><br/>
+              Ponle nombre (ej. <b>MO1</b>) y guárdala. Luego escribe <b>MO1</b> en los reactivos de arriba o de abajo, solo o con texto (ej. <b>1) MO1, NaH</b>), en cualquier flecha. Con <b>Encajar Esquema</b> la flecha se alarga para que quepa.
             </div>
 
           </aside>
@@ -3301,6 +3354,10 @@ export class ChemApp {
 
     const selectModalElement = (elem) => {
       modalState.activeElement = elem;
+      // Un grupo se coloca dibujando: pasar a la herramienta de enlace, como en la pizarra principal
+      if (groups.includes(elem) || !['C', 'O', 'N', 'S', 'P', 'F', 'Cl', 'Br', 'I', 'H', 'Si'].includes(elem)) {
+        if (activeModalToolKey !== 'bond') selectModalTool('bond', 'single');
+      }
       overlay.querySelectorAll('.modal-elem-btn').forEach(b => {
         const isActive = b.dataset.elem === elem;
         b.classList.toggle('active', isActive);
@@ -3428,8 +3485,8 @@ export class ChemApp {
     };
 
     // Cargar estructura existente en la flecha si la tiene
-    if (arrow.structureTop) {
-      modalState.loadFromObject(arrow.structureTop, false); // abrir no debe ser un paso de deshacer
+    if (initialStructure) {
+      modalState.loadFromObject(initialStructure, false); // abrir no debe ser un paso de deshacer
       setTimeout(centerModalStructure, 50);
     }
 
@@ -3709,6 +3766,18 @@ export class ChemApp {
       });
     });
 
+    const groupInput = overlay.querySelector('#modal-arrow-group');
+    const useTypedGroup = () => {
+      const g = groupInput.value.trim();
+      if (!g) return;
+      selectModalElement(g);
+      groupInput.blur();
+    };
+    overlay.querySelector('#modal-arrow-group-btn')?.addEventListener('click', useTypedGroup);
+    groupInput?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); useTypedGroup(); }
+    });
+
     overlay.querySelector('#modal-arrow-undo')?.addEventListener('click', (e) => {
       e.preventDefault();
       modalState.undo();
@@ -3781,9 +3850,10 @@ export class ChemApp {
 
     overlay.querySelector('#modal-arrow-delete-btn')?.addEventListener('click', (e) => {
       e.preventDefault();
-      askConfirm('¿Eliminar la molécula sobre la flecha?', () => {
+      askConfirm(editing ? `¿Eliminar la molécula ${editing}?` : '¿Eliminar la molécula sobre la flecha?', () => {
         this.state.saveSnapshot();
-        arrow.structureTop = null;
+        if (editing) this.state.molecules.delete(editing);
+        else arrow.structureTop = null;
         this.renderer.render();
         this.updateInspectors();
         closeModal();
@@ -3799,15 +3869,39 @@ export class ChemApp {
       }
     };
 
+    if (!initialStructure) {
+      const delBtn = overlay.querySelector('#modal-arrow-delete-btn');
+      if (delBtn) delBtn.style.display = 'none'; // molécula nueva: no hay nada que eliminar
+    }
+
     overlay.querySelector('#modal-arrow-cancel')?.addEventListener('click', closeModal);
 
     overlay.querySelector('#modal-arrow-save')?.addEventListener('click', () => {
+      const name = overlay.querySelector('#modal-arrow-name').value.trim();
+      if (modalState.atoms.size === 0) {
+        showToast('Dibuja primero la molécula.');
+        return;
+      }
+      if (!/^\p{L}[\p{L}\p{N}_]+$/u.test(name)) {
+        showToast('El nombre debe empezar por letra y tener al menos 2 caracteres: letras, números o _ (ej. MO1).');
+        return;
+      }
+      if (name !== editing && this.state.molecules.has(name)) {
+        showToast(`Ya existe una molécula llamada ${name}. Elige otro nombre.`);
+        return;
+      }
       this.state.saveSnapshot();
-      const atoms = Array.from(modalState.atoms.values());
-      if (atoms.length === 0) {
+      if (editing) this.state.renameMolecule(editing, name);
+      this.state.molecules.set(name, {
+        atoms: Array.from(modalState.atoms.values()).map(x => ({ ...x })),
+        bonds: Array.from(modalState.bonds.values()).map(x => ({ ...x }))
+      });
+      if (!editing && arrow.structureTop) {
+        // Molécula antigua puesta directamente sobre la flecha: pasa a ser una con nombre en el mismo sitio
         arrow.structureTop = null;
-      } else {
-        arrow.structureTop = ChemSerializer.serialize(modalState);
+        arrow.reagentsTop = [arrow.reagentsTop, name].filter(x => x && x.trim()).join('\n');
+      } else if (!editing) {
+        showToast(`Guardada como ${name}. Escribe ${name} en los reactivos de arriba o de abajo.`);
       }
       this.renderer.render();
       this.updateInspectors();

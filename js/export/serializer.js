@@ -12,7 +12,8 @@ export class ChemSerializer {
       bonds: Array.from(state.bonds.values()),
       arrows: Array.from(state.arrows.values()),
       referenceBoxes: Array.from(state.referenceBoxes.values()),
-      textLabels: Array.from(state.textLabels.values())
+      textLabels: Array.from(state.textLabels.values()),
+      molecules: state.moleculeList ? state.moleculeList() : []
     };
   }
 
