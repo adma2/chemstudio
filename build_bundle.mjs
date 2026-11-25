@@ -6,6 +6,7 @@ const filesInOrder = [
   'js/chem-engine/valence.js',
   'js/chem-engine/templates.js',
   'js/chem-engine/snapping.js',
+  'js/chem-engine/ring-geometry.js',
   'js/chem-engine/aligner.js',
   'js/chem-engine/problem-builder.js',
   'js/chem-engine/icho-data.js',

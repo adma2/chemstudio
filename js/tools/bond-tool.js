@@ -8,6 +8,7 @@
  *    o conecta directamente a otro átomo si el cursor está cerca de él.
  */
 
+import { regularizeClosedRing } from '../chem-engine/ring-geometry.js';
 import { snapBond, calculateNextBondAngle, findNearestAnchor, pickChairGuide, STANDARD_BOND_LENGTH } from '../chem-engine/snapping.js';
 
 export class BondTool {
@@ -176,6 +177,11 @@ export class BondTool {
       atom2: endAtom.id,
       type: this.state.bondType || 'single'
     });
+
+    // Si el enlace cierra un anillo de 5 o 7, dejarlo regular
+    if (anchor && anchor.type === 'atom' && regularizeClosedRing(this.dragStartAtom.id, endAtom.id, this.state)) {
+      this.state.updateValences();
+    }
 
     this.isDragging = false;
     this.dragStartAtom = null;

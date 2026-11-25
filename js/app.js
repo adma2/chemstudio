@@ -20,6 +20,7 @@ import { ChemExporter } from './export/exporter.js';
 import { ChemSerializer } from './export/serializer.js';
 import { ICHO_GLUCOSE_SCHEME } from './chem-engine/icho-data.js';
 import { EXAMPLE_SCHEMES } from './chem-engine/examples.js';
+import { regularizeRingsOf } from './chem-engine/ring-geometry.js';
 import { ProblemBuilder } from './chem-engine/problem-builder.js';
 import { calculateNextBondAngle, STANDARD_BOND_LENGTH } from './chem-engine/snapping.js';
 import { PERIODIC_TABLE_DATA, ELEMENTS, calculateMolecularFormula } from './chem-engine/elements.js';
@@ -1273,6 +1274,18 @@ export class ChemApp {
         this.renderer.render();
         this.updateInspectors();
       }
+    });
+
+    document.getElementById('btn-regularize-rings')?.addEventListener('click', () => {
+      const before = this.state.makeSnapshot();
+      const count = regularizeRingsOf(this.state.selected.atoms, this.state);
+      if (!count) {
+        showToast('No hay anillos de 5 o 7 que regularizar en la selección.');
+        return;
+      }
+      this.state.saveSnapshot(before);
+      this.state.updateValences();
+      this.renderer.render();
     });
 
     document.getElementById('btn-auto-length-arrow')?.addEventListener('click', () => {

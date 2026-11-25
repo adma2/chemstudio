@@ -1990,3 +1990,23 @@ console.log('\n--- TEST: Arrastrar una molécula seleccionada con el recuadro --
   console.assert(Math.abs((down.arrow.y2 - down.arrow.y1) - len) < 1, 'Encajar respeta el largo puesto a mano');
   console.log('✓ Filas en serpentina y flechas estirables');
 }
+
+// Anillos de 5 deformados: se vuelven regulares sobre la arista fusionada
+{
+  const { regularizeRingsOf, regularizeClosedRing } = await import('../js/chem-engine/ring-geometry.js');
+  const st = new ChemState();
+  const pts = { n: [508, 635], c: [508, 588], a: [556, 588], b: [590, 635], d: [549, 660], h1: [467, 565], h2: [427, 588], h3: [427, 635], h4: [467, 660] };
+  for (const [id, [x, y]] of Object.entries(pts)) st.addAtom({ id, x, y, element: id === 'n' ? 'N' : 'C' });
+  st.addAtom({ id: 'oh', x: 575, y: 548, element: 'O' });
+  for (const [p, q] of [['n', 'c'], ['c', 'a'], ['a', 'b'], ['b', 'd'], ['d', 'n'], ['c', 'h1'], ['h1', 'h2'], ['h2', 'h3'], ['h3', 'h4'], ['h4', 'n'], ['a', 'oh']]) st.addBond({ atom1: p, atom2: q, type: 'single' });
+  console.assert(regularizeRingsOf(['a'], st) === 1, 'Regulariza el anillo de 5');
+  const P = (id) => st.getAtom(id), len = (p, q) => Math.hypot(P(p).x - P(q).x, P(p).y - P(q).y);
+  const sides = [['n', 'c'], ['c', 'a'], ['a', 'b'], ['b', 'd'], ['d', 'n']].map(e => len(...e));
+  console.assert(sides.every(x => Math.abs(x - sides[0]) < 0.1), 'Lados iguales');
+  console.assert(P('n').x === 508 && P('c').y === 588 && P('h2').x === 427, 'La arista fusionada y el otro anillo no se mueven');
+  console.assert(P('b').x > 508 && Math.abs(P('b').y - 611.5) < 0.5, 'Pentágono del mismo lado y simétrico');
+  console.assert(Math.abs(len('a', 'oh') - Math.hypot(19, 40)) < 0.1, 'El sustituyente conserva su enlace');
+  console.assert(regularizeRingsOf(['a'], st) === 0, 'Ya regular: no cambia');
+  console.assert(regularizeClosedRing('h1', 'h2', st) === false, 'Los anillos de 6 no se tocan');
+  console.log('✓ Anillos de 5 regulares');
+}
