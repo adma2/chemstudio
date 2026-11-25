@@ -30,6 +30,8 @@ export class ArrowTool {
       this.activeHandleArrow = this.state.arrows.get(targetInfo.arrowId);
       this.activeHandleRole = targetInfo.role;
       this.isDrawing = true;
+      this.handleSnapshot = this.state.makeSnapshot();
+      this.stretch = this.prepareStretch(this.activeHandleArrow, targetInfo.role);
       return;
     }
 
@@ -118,6 +120,13 @@ export class ArrowTool {
         return;
       }
 
+      // Flecha unida a recuadros: estirarla arrastra consigo el resto del esquema (Shift: mover libre)
+      if (this.stretch && !e.shiftKey) {
+        this.applyStretch(arrow, canvasPos);
+        this.renderer.render();
+        return;
+      }
+
       if (arrow.bend) {
         // Flecha en "L": los extremos se mueven libres (la esquina se recalcula sola)
         if (this.activeHandleRole === 'end') { arrow.x2 = canvasPos.x; arrow.y2 = canvasPos.y; }
@@ -179,7 +188,15 @@ export class ArrowTool {
     this.clearPreview();
 
     if (this.activeHandleArrow) {
-      this.state.saveSnapshot();
+      const arrow = this.activeHandleArrow;
+      if (this.handleSnapshot && this.state.makeSnapshot() !== this.handleSnapshot) {
+        this.state.saveSnapshot(this.handleSnapshot); // Deshacer vuelve a antes de estirarla
+        if (arrow.type !== 'fork' && arrow.type !== 'converge' && !arrow.bend) {
+          arrow.userLength = Math.round(Math.hypot(arrow.x2 - arrow.x1, arrow.y2 - arrow.y1)); // Encajar lo respeta
+        }
+      }
+      this.handleSnapshot = null;
+      this.stretch = null;
       this.activeHandleArrow = null;
       this.activeHandleRole = null;
       ChemAligner.adjustArrowsToMolecules(this.state);
@@ -514,6 +531,35 @@ export class ArrowTool {
     }
 
     this.resetDrawingState();
+  }
+
+  /** Prepara el estirado de una flecha entre recuadros: qué parte del esquema se mueve con el extremo */
+  prepareStretch(arrow, role) {
+    if (!arrow || arrow.type === 'fork' || arrow.type === 'converge') return null;
+    const { starts: [src], ends: [tgt] } = ChemAligner.arrowBoxes(arrow, this.state);
+    const moved = role === 'end' ? tgt : src;
+    const other = role === 'end' ? src : tgt;
+    if (!moved) return null;
+    const group = ChemAligner.connectedBoxes(moved, arrow, this.state);
+    if (other && group.has(other)) return null; // ciclo: mover el extremo libremente
+    return { role, move: ChemAligner.createMover(group, arrow, this.state) };
+  }
+
+  applyStretch(arrow, pos) {
+    const { role, move } = this.stretch;
+    const isEnd = role === 'end';
+    const kx = isEnd ? 'x2' : 'x1', ky = isEnd ? 'y2' : 'y1';
+    const fx = isEnd ? arrow.x1 : arrow.x2, fy = isEnd ? arrow.y1 : arrow.y2;
+    const MIN = 30;
+    // Nueva posición en un eje, sin invertir el sentido de la flecha ni hacerla desaparecer
+    const along = (fixed, current, wanted) => current >= fixed ? Math.max(fixed + MIN, wanted) : Math.min(fixed - MIN, wanted);
+    const horizontal = Math.abs(arrow.x2 - arrow.x1) >= Math.abs(arrow.y2 - arrow.y1);
+    let nx = arrow[kx], ny = arrow[ky];
+    if (arrow.bend || horizontal) nx = along(fx, arrow[kx], pos.x);
+    if (arrow.bend || !horizontal) ny = along(fy, arrow[ky], pos.y);
+    move(nx - arrow[kx], ny - arrow[ky]);
+    arrow[kx] = nx;
+    arrow[ky] = ny;
   }
 
   resetDrawingState() {

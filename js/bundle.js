@@ -2294,11 +2294,14 @@ class ChemAligner {
       }
     }
 
-    // 2. Procesar flechas ordenadas de izquierda a derecha
+    // 2. Procesar las flechas en orden de síntesis (así una fila que vuelve hacia la izquierda se coloca
+    //    después de la que baja hasta ella); a igualdad, de izquierda a derecha
+    const order = this.synthesisOrder(state, links, splitSources, splitTargets);
+    const placed = new Set(); // recuadros ya colocados por una flecha anterior
     const sortedArrows = Array.from(state.arrows.values()).sort((a, b) => {
       const ax = Math.min(a.x1, a.x2);
       const bx = Math.min(b.x1, b.x2);
-      return (branchRank(a) - branchRank(b)) || (ax - bx);
+      return (branchRank(a) - branchRank(b)) || (order(a) - order(b)) || (ax - bx);
     });
 
     const gapOf = (ent) => (ent && ent.type === 'box') ? ProblemBuilder.fitGap(ent.entity) : 16;
@@ -2340,13 +2343,14 @@ class ChemAligner {
       const requiredAssemblyWidth = Math.max(requiredTextWidth, topMolWidth);
 
       // Flechas horizontales: se expanden según la anchura requerida por reactivos y moléculas
-      const desiredArrowLen = Math.max(105, Math.round(requiredAssemblyWidth + 38));
+      // (si el usuario la estiró a mano, se respeta su largo)
+      let desiredArrowLen = arrow.userLength || Math.max(105, Math.round(requiredAssemblyWidth + 38));
       // Flechas verticales: el texto se escribe horizontalmente a la derecha, por lo que NO deben alargarse verticalmente por la cantidad de caracteres
       // (salvo que lleven moléculas dibujadas al lado, que sí necesitan su altura)
       const hasMolecules = [arrow.reagentsTop, arrow.reagentsBottom].some(txt => ArrowRenderer.layoutReagents(txt, state));
       const reagentsHeight = topSize.height + bottomSize.height;
       const numLines = hasMolecules ? Math.ceil(reagentsHeight / 20) : topLines.length + bottomLines.length;
-      const desiredVerticalLen = Math.max(72, Math.min(95, Math.round(numLines * 16 + 28)), hasMolecules ? reagentsHeight + 16 : 0);
+      const desiredVerticalLen = arrow.userLength || Math.max(72, Math.min(95, Math.round(numLines * 16 + 28)), hasMolecules ? reagentsHeight + 16 : 0);
 
       // Buscar entidad de origen (cercana al inicio de la flecha)
       let source = null;
@@ -2377,6 +2381,33 @@ class ChemAligner {
       if (link) {
         source = allEntities.find(e => e.type === 'box' && e.entity.id === link.src) || source;
         target = allEntities.find(e => e.type === 'box' && e.entity.id === link.tgt) || target;
+      }
+
+      // Fórmula bajo una letra (p. ej. C18H25NO4): es más ancha que su recuadro, así que hay que dejarle
+      // sitio junto a los reactivos de abajo
+      if (isHorizontal && bottomSize.width && !arrow.userLength) {
+        const over = [source, target].map(e => {
+          const box = e && e.type === 'box' ? e.entity : null;
+          if (!box || !box.description || !ProblemBuilder.isCompact(box)) return 0;
+          return String(box.description).trim().length * 6.2 / 2 - box.width / 2 - ProblemBuilder.fitGap(box);
+        });
+        desiredArrowLen = Math.max(desiredArrowLen, Math.round(bottomSize.width + 20 + 2 * Math.max(0, ...over)));
+      }
+
+      // Destino ya colocado (ciclo o dos flechas al mismo recuadro): no moverlo, solo unir los extremos
+      const targetPlaced = Boolean(link && target && placed.has(link.tgt));
+      for (const id of [link?.src, link?.tgt, ...(splitSources.get(arrow.id) || []), ...(splitTargets.get(arrow.id) || [])]) {
+        if (id) placed.add(id);
+      }
+      if (targetPlaced && !isBent && source) {
+        const dir = isHorizontal ? (isPointingRight ? 'right' : 'left') : (isPointingDown ? 'down' : 'up');
+        const start = ProblemBuilder.arrowEndAtBox(source.entity, target.entity, dir, gapOf(source));
+        const end = ProblemBuilder.arrowEndAtBox(source.entity, target.entity, dir, gapOf(target));
+        arrow.x1 = start.x1;
+        arrow.y1 = start.y1;
+        arrow.x2 = end.x2;
+        arrow.y2 = end.y2;
+        continue;
       }
 
       if (isBent) {
@@ -2681,8 +2712,152 @@ class ChemAligner {
       }
     }
 
-    // 3. Ajuste final de seguridad de flechas sueltas
+    // 3. Si una fila choca con otra, alargar la flecha vertical que las une
+    this.separateRows(state);
+
+    // 4. Ajuste final de seguridad de flechas sueltas
     this.adjustArrowsToMolecules(state, 18);
+  }
+
+  /** Recuadros de compuesto que toca cada extremo de una flecha: { starts: [ids], ends: [ids] } */
+  static arrowBoxes(arrow, state) {
+    const near = (x, y, exclude = null) => ProblemBuilder.findBoxNearPoint(x, y, state, exclude)?.id;
+    let starts, ends;
+    if (arrow.type === 'fork' || arrow.type === 'converge') {
+      const half = (arrow.branchSpacing || 150) / 2;
+      const vertical = arrow.type === 'fork' && (arrow.direction === 'down' || arrow.direction === 'up');
+      const midY = arrow.type === 'fork' ? arrow.y1 : arrow.y2;
+      const two = vertical
+        ? [[arrow.xTop ?? arrow.x1 - half, arrow.y2], [arrow.xBottom ?? arrow.x1 + half, arrow.y2]]
+        : [arrow.yTop ?? midY - half, arrow.yBottom ?? midY + half].map(y => [arrow.type === 'fork' ? arrow.x2 : arrow.x1, y]);
+      const pair = two.map(([x, y]) => near(x, y));
+      starts = arrow.type === 'fork' ? [near(arrow.x1, arrow.y1)] : pair;
+      ends = arrow.type === 'fork' ? pair : [near(arrow.x2, arrow.y2)];
+    } else {
+      const src = ProblemBuilder.findBoxNearPoint(arrow.x1, arrow.y1, state);
+      starts = [src?.id];
+      ends = [near(arrow.x2, arrow.y2, src)];
+    }
+    return { starts: starts.filter(Boolean), ends: ends.filter(Boolean) };
+  }
+
+  /** Recuadros unidos a 'boxId' por flechas, sin pasar por la flecha 'exceptArrow' */
+  static connectedBoxes(boxId, exceptArrow, state) {
+    const groups = [];
+    for (const a of state.arrows.values()) {
+      if (a === exceptArrow) continue;
+      const { starts, ends } = this.arrowBoxes(a, state);
+      groups.push([...starts, ...ends]);
+    }
+    const seen = new Set([boxId]);
+    for (const id of seen) { // el Set crece mientras se recorre
+      for (const g of groups) if (g.includes(id)) g.forEach(x => seen.add(x));
+    }
+    return seen;
+  }
+
+  /** Función que mueve un grupo de recuadros con sus moléculas, rótulos y flechas internas */
+  static createMover(boxIds, exceptArrow, state) {
+    const boxes = Array.from(boxIds).map(id => state.referenceBoxes.get(id)).filter(Boolean);
+    const inBox = (x, y, b, below = 0, side = 0) => x >= b.x - side && x <= b.x + b.width + side && y >= b.y && y <= b.y + b.height + below;
+    const atoms = [];
+    for (const mol of getAllMolecules(state)) {
+      if (mol.bbox && boxes.some(b => inBox(mol.bbox.centerX, mol.bbox.centerY, b))) atoms.push(...mol.atoms);
+    }
+    const labels = Array.from(state.textLabels.values()).filter(l => boxes.some(b => inBox(l.x, l.y, b, 60, 35)));
+    const arrows = Array.from(state.arrows.values()).filter(a => {
+      if (a === exceptArrow) return false;
+      const { starts, ends } = this.arrowBoxes(a, state);
+      const ids = [...starts, ...ends];
+      return ids.length > 0 && ids.every(id => boxIds.has(id));
+    });
+    return (dx, dy) => {
+      for (const o of [...boxes, ...atoms, ...labels]) { o.x += dx; o.y += dy; }
+      for (const a of arrows) {
+        for (const k of ['x1', 'x2', 'xTop', 'xBottom', 'stemEndX', 'stemStartX']) if (Number.isFinite(a[k])) a[k] += dx;
+        for (const k of ['y1', 'y2', 'yTop', 'yBottom', 'yMid', 'stemEndY']) if (Number.isFinite(a[k])) a[k] += dy;
+      }
+    };
+  }
+
+  /** Zonas ocupadas por un grupo de recuadros y por los reactivos de sus flechas horizontales */
+  static occupiedRects(boxIds, exceptArrow, state) {
+    const rects = [];
+    for (const id of boxIds) {
+      const b = state.referenceBoxes.get(id);
+      if (b) rects.push({ minX: b.x, maxX: b.x + b.width, minY: b.y, maxY: b.y + b.height });
+    }
+    for (const a of state.arrows.values()) {
+      if (a === exceptArrow || a.type === 'fork' || a.type === 'converge' || a.bend) continue;
+      if (Math.abs(a.y2 - a.y1) > Math.abs(a.x2 - a.x1)) continue;
+      const { starts, ends } = this.arrowBoxes(a, state);
+      if (![...starts, ...ends].some(id => boxIds.has(id))) continue;
+      const top = ArrowRenderer.reagentsSize(a.reagentsTop, state);
+      const bottom = ArrowRenderer.reagentsSize(a.reagentsBottom, state);
+      const mid = (a.x1 + a.x2) / 2, y = (a.y1 + a.y2) / 2;
+      const half = Math.max(top.width, bottom.width, Math.abs(a.x2 - a.x1)) / 2;
+      rects.push({ minX: mid - half, maxX: mid + half, minY: y - 8 - top.height, maxY: y + 11 + bottom.height });
+    }
+    return rects;
+  }
+
+  /**
+   * Evita que una fila del esquema se encime con otra: alarga la flecha vertical (o en "L") que
+   * las une y desplaza toda la fila del otro extremo.
+   */
+  static separateRows(state, margin = 14) {
+    for (let iter = 0; iter < 12; iter++) {
+      let changed = false;
+      for (const arrow of state.arrows.values()) {
+        if (arrow.type === 'fork' || arrow.type === 'converge') continue;
+        if (!getArrowBendCorner(arrow) && Math.abs(arrow.y2 - arrow.y1) <= Math.abs(arrow.x2 - arrow.x1)) continue;
+        const { starts: [src], ends: [tgt] } = this.arrowBoxes(arrow, state);
+        if (!src || !tgt) continue;
+        const moving = this.connectedBoxes(tgt, arrow, state);
+        if (moving.has(src)) continue; // ciclo: no se puede mover un lado sin el otro
+        const fixed = this.connectedBoxes(src, arrow, state);
+        const down = arrow.y2 > arrow.y1;
+        let push = 0;
+        const fixedRects = this.occupiedRects(fixed, arrow, state);
+        for (const m of this.occupiedRects(moving, arrow, state)) {
+          for (const f of fixedRects) {
+            if (m.minX >= f.maxX + margin || m.maxX + margin <= f.minX ||
+                m.minY >= f.maxY + margin || m.maxY + margin <= f.minY) continue;
+            push = Math.max(push, down ? f.maxY + margin - m.minY : m.maxY + margin - f.minY);
+          }
+        }
+        if (push < 0.5) continue;
+        const dy = down ? Math.ceil(push) : -Math.ceil(push);
+        this.createMover(moving, arrow, state)(0, dy);
+        arrow.y2 += dy;
+        changed = true;
+      }
+      if (!changed) break;
+    }
+  }
+
+  /** Orden de síntesis de las flechas: posición de su recuadro de origen siguiendo las conexiones */
+  static synthesisOrder(state, links, splitSources, splitTargets) {
+    const edges = [];
+    for (const l of links.values()) edges.push([l.src, l.tgt]);
+    for (const [id, srcs] of splitSources) {
+      for (const s of srcs) for (const t of splitTargets.get(id) || []) if (s && t && s !== t) edges.push([s, t]);
+    }
+    const pending = new Set(edges.flat());
+    const pos = new Map();
+    const x = (id) => state.referenceBoxes.get(id)?.x ?? 0;
+    while (pending.size) {
+      const ids = Array.from(pending).sort((a, b) => x(a) - x(b));
+      // Sin dependencias pendientes; si hay un ciclo, se entra por el de más a la izquierda
+      const next = ids.find(id => !edges.some(([s, t]) => t === id && pending.has(s))) || ids[0];
+      pending.delete(next);
+      pos.set(next, pos.size + 1);
+    }
+    return (arrow) => {
+      const l = links.get(arrow.id);
+      const ids = l ? [l.src] : (splitSources.get(arrow.id) || []).filter(Boolean);
+      return Math.max(0, ...ids.map(id => pos.get(id) || 0));
+    };
   }
 
   /**
@@ -2786,6 +2961,7 @@ class ChemAligner {
  * Permite colocar flechas con tamaño estándar y genera automáticamente recuadros de
  * compuestos correlativos (A, B, C...) que se auto-ajustan al contenido molecular.
  */
+
 
 
 class ProblemBuilder {
@@ -3202,9 +3378,22 @@ class ProblemBuilder {
       newBoxY = sourceBox.y + sourceBox.height / 2 - boxHeight / 2;
     }
 
-    // Si el nuevo recuadro caería encima de uno existente (p. ej. clics repetidos o cerrar un
-    // ciclo), se reutiliza ese recuadro en vez de encimar otro
-    const existing = this.findOverlappingBox({ x: newBoxX, y: newBoxY, width: boxWidth, height: boxHeight }, state, sourceBox);
+    // Si el nuevo recuadro caería encima de uno existente que está justo enfrente (p. ej. clics
+    // repetidos o cerrar un ciclo), se reutiliza. Si solo lo roza (una molécula alta de otra fila),
+    // no se une a ella: se hace sitio para el recuadro nuevo.
+    const horizontal = direction === 'left' || direction === 'right';
+    const rect = { x: newBoxX, y: newBoxY, width: boxWidth, height: boxHeight };
+    let crowded = false;
+    let existing = null;
+    for (const b of state.referenceBoxes.values()) {
+      if (b === sourceBox || b.boxType !== 'compound') continue;
+      if (!(rect.x < b.x + b.width + 6 && rect.x + rect.width + 6 > b.x && rect.y < b.y + b.height + 6 && rect.y + rect.height + 6 > b.y)) continue;
+      const offset = horizontal
+        ? Math.abs((b.y + b.height / 2) - (sourceBox.y + sourceBox.height / 2))
+        : Math.abs((b.x + b.width / 2) - (sourceBox.x + sourceBox.width / 2));
+      if (offset <= 35 || this.arrowConnects(sourceBox, b, state)) { existing = b; break; }
+      crowded = true;
+    }
     if (existing) {
       if (this.arrowConnects(sourceBox, existing, state)) {
         return { arrow: null, newBox: existing, reused: true };
@@ -3235,6 +3424,17 @@ class ProblemBuilder {
       width: boxWidth,
       height: boxHeight
     });
+
+    if (crowded) {
+      ChemAligner.separateRows(state);
+      // Si no hay una flecha vertical que alargar, alejar el recuadro en la dirección de la flecha
+      const ux = direction === 'right' ? 20 : direction === 'left' ? -20 : 0;
+      const uy = direction === 'down' ? 20 : direction === 'up' ? -20 : 0;
+      for (let i = 0; i < 80 && this.findOverlappingBox(newBox, state, newBox); i++) {
+        newBox.x += ux; arrow.x2 += ux;
+        newBox.y += uy; arrow.y2 += uy;
+      }
+    }
 
     this.assignUnknownLetters(state);
 
@@ -5649,9 +5849,12 @@ class ArrowRenderer {
     // 6. Tiradores de edición interactiva si está seleccionada
     if (isSelected) {
       group.appendChild(this.createHandle(x1, y1, 'start', id));
-      group.appendChild(this.createHandle(stemEndX, y1, 'stemEnd', id));
-      group.appendChild(this.createHandle(x2, yTop, 'endTop', id));
-      group.appendChild(this.createHandle(x2, yBottom, 'endBottom', id));
+      if (!isVertical) {
+        const stemX = arrow.stemEndX !== undefined ? arrow.stemEndX : (x1 + x2) / 2;
+        group.appendChild(this.createHandle(stemX, y1, 'stemEnd', id));
+        group.appendChild(this.createHandle(x2, arrow.yTop !== undefined ? arrow.yTop : y1 - branchSpacing / 2, 'endTop', id));
+        group.appendChild(this.createHandle(x2, arrow.yBottom !== undefined ? arrow.yBottom : y1 + branchSpacing / 2, 'endBottom', id));
+      }
     }
 
     return group;
@@ -8669,6 +8872,8 @@ class ArrowTool {
       this.activeHandleArrow = this.state.arrows.get(targetInfo.arrowId);
       this.activeHandleRole = targetInfo.role;
       this.isDrawing = true;
+      this.handleSnapshot = this.state.makeSnapshot();
+      this.stretch = this.prepareStretch(this.activeHandleArrow, targetInfo.role);
       return;
     }
 
@@ -8757,6 +8962,13 @@ class ArrowTool {
         return;
       }
 
+      // Flecha unida a recuadros: estirarla arrastra consigo el resto del esquema (Shift: mover libre)
+      if (this.stretch && !e.shiftKey) {
+        this.applyStretch(arrow, canvasPos);
+        this.renderer.render();
+        return;
+      }
+
       if (arrow.bend) {
         // Flecha en "L": los extremos se mueven libres (la esquina se recalcula sola)
         if (this.activeHandleRole === 'end') { arrow.x2 = canvasPos.x; arrow.y2 = canvasPos.y; }
@@ -8818,7 +9030,15 @@ class ArrowTool {
     this.clearPreview();
 
     if (this.activeHandleArrow) {
-      this.state.saveSnapshot();
+      const arrow = this.activeHandleArrow;
+      if (this.handleSnapshot && this.state.makeSnapshot() !== this.handleSnapshot) {
+        this.state.saveSnapshot(this.handleSnapshot); // Deshacer vuelve a antes de estirarla
+        if (arrow.type !== 'fork' && arrow.type !== 'converge' && !arrow.bend) {
+          arrow.userLength = Math.round(Math.hypot(arrow.x2 - arrow.x1, arrow.y2 - arrow.y1)); // Encajar lo respeta
+        }
+      }
+      this.handleSnapshot = null;
+      this.stretch = null;
       this.activeHandleArrow = null;
       this.activeHandleRole = null;
       ChemAligner.adjustArrowsToMolecules(this.state);
@@ -9153,6 +9373,35 @@ class ArrowTool {
     }
 
     this.resetDrawingState();
+  }
+
+  /** Prepara el estirado de una flecha entre recuadros: qué parte del esquema se mueve con el extremo */
+  prepareStretch(arrow, role) {
+    if (!arrow || arrow.type === 'fork' || arrow.type === 'converge') return null;
+    const { starts: [src], ends: [tgt] } = ChemAligner.arrowBoxes(arrow, this.state);
+    const moved = role === 'end' ? tgt : src;
+    const other = role === 'end' ? src : tgt;
+    if (!moved) return null;
+    const group = ChemAligner.connectedBoxes(moved, arrow, this.state);
+    if (other && group.has(other)) return null; // ciclo: mover el extremo libremente
+    return { role, move: ChemAligner.createMover(group, arrow, this.state) };
+  }
+
+  applyStretch(arrow, pos) {
+    const { role, move } = this.stretch;
+    const isEnd = role === 'end';
+    const kx = isEnd ? 'x2' : 'x1', ky = isEnd ? 'y2' : 'y1';
+    const fx = isEnd ? arrow.x1 : arrow.x2, fy = isEnd ? arrow.y1 : arrow.y2;
+    const MIN = 30;
+    // Nueva posición en un eje, sin invertir el sentido de la flecha ni hacerla desaparecer
+    const along = (fixed, current, wanted) => current >= fixed ? Math.max(fixed + MIN, wanted) : Math.min(fixed - MIN, wanted);
+    const horizontal = Math.abs(arrow.x2 - arrow.x1) >= Math.abs(arrow.y2 - arrow.y1);
+    let nx = arrow[kx], ny = arrow[ky];
+    if (arrow.bend || horizontal) nx = along(fx, arrow[kx], pos.x);
+    if (arrow.bend || !horizontal) ny = along(fy, arrow[ky], pos.y);
+    move(nx - arrow[kx], ny - arrow[ky]);
+    arrow[kx] = nx;
+    arrow[ky] = ny;
   }
 
   resetDrawingState() {
@@ -11238,7 +11487,9 @@ class ChemApp {
         return;
       }
 
-      const activeTool = this.tools[this.activeToolKey];
+      // Los tiradores de una flecha se estiran igual con Seleccionar que con la herramienta Flecha
+      this.gestureTool = targetInfo && targetInfo.isArrowHandle && this.activeToolKey === 'select' ? this.tools.arrow : null;
+      const activeTool = this.gestureTool || this.tools[this.activeToolKey];
       if (activeTool && activeTool.onMouseDown) {
         // Arrastre en curso: el rótulo flotante no debe interceptar el ratón (ver app.css)
         this.canvasGesture = true;
@@ -11286,7 +11537,7 @@ class ChemApp {
       this.renderer.hoveredAtomId = targetInfo && targetInfo.type === 'atom' ? targetInfo.id : null;
       this.renderer.hoveredBondId = targetInfo && targetInfo.type === 'bond' ? targetInfo.id : null;
 
-      const activeTool = this.tools[this.activeToolKey];
+      const activeTool = this.gestureTool || this.tools[this.activeToolKey];
       if (activeTool && activeTool.onMouseMove) {
         activeTool.onMouseMove(e, canvasPos, targetInfo);
       }
@@ -11333,7 +11584,8 @@ class ChemApp {
   endCanvasGesture(e) {
     this.canvasGesture = false;
     this.svgElement.parentElement.classList.remove('canvas-gesture');
-    const activeTool = this.tools[this.activeToolKey];
+    const activeTool = this.gestureTool || this.tools[this.activeToolKey];
+    this.gestureTool = null;
     if (activeTool && activeTool.onMouseUp) {
       activeTool.onMouseUp(e, this.getCanvasCoordinates(e), this.getTargetInfo(e));
     }
@@ -11985,6 +12237,15 @@ class ChemApp {
         this.renderer.render();
         this.updateInspectors();
       }
+    });
+
+    document.getElementById('btn-auto-length-arrow')?.addEventListener('click', () => {
+      const arrow = this.state.arrows.get(Array.from(this.state.selected.arrows)[0]);
+      if (!arrow || !arrow.userLength) return;
+      this.state.saveSnapshot();
+      delete arrow.userLength;
+      this.updateInspectors();
+      showToast('Largo automático: pulsa Encajar Esquema para aplicarlo.');
     });
 
     // Doblar en L: recta → (→ ↓) → (↓ →) → recta
@@ -12727,6 +12988,8 @@ class ChemApp {
         document.getElementById('arrow-reagents-top').value = arrow.reagentsTop || '';
         document.getElementById('arrow-reagents-bottom').value = arrow.reagentsBottom || '';
         this.renderArrowMoleculeList(arrow);
+        const autoLenBtn = document.getElementById('btn-auto-length-arrow');
+        if (autoLenBtn) autoLenBtn.style.display = arrow.userLength ? '' : 'none';
         const badge = document.getElementById('arrow-struct-badge');
         const drawBtn = document.getElementById('btn-draw-arrow-struct');
         const clearBtn = document.getElementById('btn-clear-arrow-struct');

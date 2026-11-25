@@ -523,7 +523,9 @@ export class ChemApp {
         return;
       }
 
-      const activeTool = this.tools[this.activeToolKey];
+      // Los tiradores de una flecha se estiran igual con Seleccionar que con la herramienta Flecha
+      this.gestureTool = targetInfo && targetInfo.isArrowHandle && this.activeToolKey === 'select' ? this.tools.arrow : null;
+      const activeTool = this.gestureTool || this.tools[this.activeToolKey];
       if (activeTool && activeTool.onMouseDown) {
         // Arrastre en curso: el rótulo flotante no debe interceptar el ratón (ver app.css)
         this.canvasGesture = true;
@@ -571,7 +573,7 @@ export class ChemApp {
       this.renderer.hoveredAtomId = targetInfo && targetInfo.type === 'atom' ? targetInfo.id : null;
       this.renderer.hoveredBondId = targetInfo && targetInfo.type === 'bond' ? targetInfo.id : null;
 
-      const activeTool = this.tools[this.activeToolKey];
+      const activeTool = this.gestureTool || this.tools[this.activeToolKey];
       if (activeTool && activeTool.onMouseMove) {
         activeTool.onMouseMove(e, canvasPos, targetInfo);
       }
@@ -618,7 +620,8 @@ export class ChemApp {
   endCanvasGesture(e) {
     this.canvasGesture = false;
     this.svgElement.parentElement.classList.remove('canvas-gesture');
-    const activeTool = this.tools[this.activeToolKey];
+    const activeTool = this.gestureTool || this.tools[this.activeToolKey];
+    this.gestureTool = null;
     if (activeTool && activeTool.onMouseUp) {
       activeTool.onMouseUp(e, this.getCanvasCoordinates(e), this.getTargetInfo(e));
     }
@@ -1270,6 +1273,15 @@ export class ChemApp {
         this.renderer.render();
         this.updateInspectors();
       }
+    });
+
+    document.getElementById('btn-auto-length-arrow')?.addEventListener('click', () => {
+      const arrow = this.state.arrows.get(Array.from(this.state.selected.arrows)[0]);
+      if (!arrow || !arrow.userLength) return;
+      this.state.saveSnapshot();
+      delete arrow.userLength;
+      this.updateInspectors();
+      showToast('Largo automático: pulsa Encajar Esquema para aplicarlo.');
     });
 
     // Doblar en L: recta → (→ ↓) → (↓ →) → recta
@@ -2012,6 +2024,8 @@ export class ChemApp {
         document.getElementById('arrow-reagents-top').value = arrow.reagentsTop || '';
         document.getElementById('arrow-reagents-bottom').value = arrow.reagentsBottom || '';
         this.renderArrowMoleculeList(arrow);
+        const autoLenBtn = document.getElementById('btn-auto-length-arrow');
+        if (autoLenBtn) autoLenBtn.style.display = arrow.userLength ? '' : 'none';
         const badge = document.getElementById('arrow-struct-badge');
         const drawBtn = document.getElementById('btn-draw-arrow-struct');
         const clearBtn = document.getElementById('btn-clear-arrow-struct');

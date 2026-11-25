@@ -393,9 +393,12 @@ export class ArrowRenderer {
     // 6. Tiradores de edición interactiva si está seleccionada
     if (isSelected) {
       group.appendChild(this.createHandle(x1, y1, 'start', id));
-      group.appendChild(this.createHandle(stemEndX, y1, 'stemEnd', id));
-      group.appendChild(this.createHandle(x2, yTop, 'endTop', id));
-      group.appendChild(this.createHandle(x2, yBottom, 'endBottom', id));
+      if (!isVertical) {
+        const stemX = arrow.stemEndX !== undefined ? arrow.stemEndX : (x1 + x2) / 2;
+        group.appendChild(this.createHandle(stemX, y1, 'stemEnd', id));
+        group.appendChild(this.createHandle(x2, arrow.yTop !== undefined ? arrow.yTop : y1 - branchSpacing / 2, 'endTop', id));
+        group.appendChild(this.createHandle(x2, arrow.yBottom !== undefined ? arrow.yBottom : y1 + branchSpacing / 2, 'endBottom', id));
+      }
     }
 
     return group;

@@ -5,6 +5,7 @@
  */
 
 import { getMoleculeBoundingBox, getAllMolecules, getConnectedMoleculeAtoms, getArrowBendCorner } from './elements.js';
+import { ChemAligner } from './aligner.js';
 
 export class ProblemBuilder {
   /**
@@ -420,9 +421,22 @@ export class ProblemBuilder {
       newBoxY = sourceBox.y + sourceBox.height / 2 - boxHeight / 2;
     }
 
-    // Si el nuevo recuadro caería encima de uno existente (p. ej. clics repetidos o cerrar un
-    // ciclo), se reutiliza ese recuadro en vez de encimar otro
-    const existing = this.findOverlappingBox({ x: newBoxX, y: newBoxY, width: boxWidth, height: boxHeight }, state, sourceBox);
+    // Si el nuevo recuadro caería encima de uno existente que está justo enfrente (p. ej. clics
+    // repetidos o cerrar un ciclo), se reutiliza. Si solo lo roza (una molécula alta de otra fila),
+    // no se une a ella: se hace sitio para el recuadro nuevo.
+    const horizontal = direction === 'left' || direction === 'right';
+    const rect = { x: newBoxX, y: newBoxY, width: boxWidth, height: boxHeight };
+    let crowded = false;
+    let existing = null;
+    for (const b of state.referenceBoxes.values()) {
+      if (b === sourceBox || b.boxType !== 'compound') continue;
+      if (!(rect.x < b.x + b.width + 6 && rect.x + rect.width + 6 > b.x && rect.y < b.y + b.height + 6 && rect.y + rect.height + 6 > b.y)) continue;
+      const offset = horizontal
+        ? Math.abs((b.y + b.height / 2) - (sourceBox.y + sourceBox.height / 2))
+        : Math.abs((b.x + b.width / 2) - (sourceBox.x + sourceBox.width / 2));
+      if (offset <= 35 || this.arrowConnects(sourceBox, b, state)) { existing = b; break; }
+      crowded = true;
+    }
     if (existing) {
       if (this.arrowConnects(sourceBox, existing, state)) {
         return { arrow: null, newBox: existing, reused: true };
@@ -453,6 +467,17 @@ export class ProblemBuilder {
       width: boxWidth,
       height: boxHeight
     });
+
+    if (crowded) {
+      ChemAligner.separateRows(state);
+      // Si no hay una flecha vertical que alargar, alejar el recuadro en la dirección de la flecha
+      const ux = direction === 'right' ? 20 : direction === 'left' ? -20 : 0;
+      const uy = direction === 'down' ? 20 : direction === 'up' ? -20 : 0;
+      for (let i = 0; i < 80 && this.findOverlappingBox(newBox, state, newBox); i++) {
+        newBox.x += ux; arrow.x2 += ux;
+        newBox.y += uy; arrow.y2 += uy;
+      }
+    }
 
     this.assignUnknownLetters(state);
 

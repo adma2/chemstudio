@@ -1963,3 +1963,30 @@ console.log('\n--- TEST: Arrastrar una molécula seleccionada con el recuadro --
   console.assert(st.molecules.has('Wittig'), 'Rehacer la recupera');
   console.log('✓ Moléculas con nombre: texto, renombrar, guardar y deshacer');
 }
+
+// Serpentina: una fila que vuelve a la izquierda no se une a una molécula alta de la fila de arriba,
+// y estirar una flecha arrastra lo que sigue
+{
+  const st = new ChemState();
+  const mol = st.addReferenceBox({ boxType: 'compound', label: '1', x: 0, y: 0, width: 260, height: 260 });
+  st.addAtom({ x: 130, y: 20, element: 'O' });
+  st.addAtom({ x: 130, y: 240, element: 'O' });
+  const p = ProblemBuilder.extendFromBox(mol, 'right', st).newBox;
+  const down = ProblemBuilder.extendFromBox(p, 'down', st);
+  const back = ProblemBuilder.extendFromBox(down.newBox, 'left', st);
+  console.assert(back.newBox !== mol && !back.reused, 'A la izquierda crea un recuadro nuevo, no se une a la molécula de arriba');
+  console.assert(!ProblemBuilder.findOverlappingBox(back.newBox, st, back.newBox), 'El recuadro nuevo no queda encimado');
+
+  const { ArrowTool: AT } = await import('../js/tools/arrow-tool.js');
+  const tool = new AT(st, { render() {}, svg: null });
+  const before = { p: p.y, s: down.newBox.y, t: back.newBox.y };
+  tool.onMouseDown({}, { x: down.arrow.x2, y: down.arrow.y2 }, { isArrowHandle: true, arrowId: down.arrow.id, role: 'end' });
+  tool.onMouseMove({}, { x: down.arrow.x2 + 9, y: down.arrow.y2 + 80 }, null);
+  tool.onMouseUp({}, { x: 0, y: 0 }, null);
+  console.assert(p.y === before.p && down.newBox.y === before.s + 80 && back.newBox.y === before.t + 80, 'Estirar la flecha baja toda la fila siguiente');
+  console.assert(down.arrow.x1 === down.arrow.x2, 'La flecha vertical sigue recta');
+  const len = down.arrow.y2 - down.arrow.y1;
+  ChemAligner.fitSchemeLayout(st);
+  console.assert(Math.abs((down.arrow.y2 - down.arrow.y1) - len) < 1, 'Encajar respeta el largo puesto a mano');
+  console.log('✓ Filas en serpentina y flechas estirables');
+}
